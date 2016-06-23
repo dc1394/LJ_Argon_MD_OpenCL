@@ -22,6 +22,9 @@
     <Filter Include="ソース ファイル\myrandom">
       <UniqueIdentifier>{5b51d4b4-1ca2-4f1e-906e-af66e21ac1de}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ヘッダー ファイル\myvector">
+      <UniqueIdentifier>{99584ef0-dde9-48c8-ab03-748d1316b389}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="myrandom\myrand.cpp">
@@ -38,8 +41,8 @@
     <ClInclude Include="myrandom\myrand.h">
       <Filter>ヘッダー ファイル\myrandom</Filter>
     </ClInclude>
-    <ClInclude Include="vector4.h">
-      <Filter>ヘッダー ファイル</Filter>
+    <ClInclude Include="myvector\vector4.h">
+      <Filter>ヘッダー ファイル\myvector</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

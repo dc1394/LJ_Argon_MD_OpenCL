@@ -10,21 +10,27 @@
 
 #pragma once
 
-#include "../vector4.h"
-#include <array>                    // for std::array
-#include <cstdint>                  // for std::int32_t
-#include <vector>                   // for std::vector
 #include "../myrandom/myrand.h"
-#include <cmath>                    // for std::sqrt, std::pow
-#include <boost/compute/container/vector.hpp>
-#include <boost/compute/utility/source.hpp>
-#include <boost/range/algorithm/generate.hpp>
-#include <tbb/combinable.h>         // for tbb::combinable
-#include <tbb/parallel_for.h>       // for tbb::parallel_for
-#include <tbb/partitioner.h>        // for tbb::auto_partitioner
-#include <iostream>
+#include "../myvector/vector4.h"
+#include <array>                                    // for std::array
+#include <cstdint>                                  // for std::int32_t
+#include <vector>                                   // for std::vector
+#include <cmath>                                    // for std::sqrt, std::pow
+#include <boost/compute/algorithm/accumulate.hpp>   // for compute::accumulate
+#include <boost/compute/algorithm/fill.hpp>         // for compute::fill
+#include <boost/compute/algorithm/transform.hpp>
+#include <boost/compute/container/vector.hpp>       // for compute::vector
+#include <boost/compute/utility/source.hpp>         // for BOOST_COMPUTE_STRINGIZE_SOURCE
+#include <boost/optional.hpp>                       // for boost::optional
+#include <boost/utility/in_place_factory.hpp>       // for boost::in_place
+#include <boost/range/algorithm/generate.hpp>       // for boost::generate
+#include <tbb/combinable.h>                         // for tbb::combinable
+#include <tbb/parallel_for.h>                       // for tbb::parallel_for
+#include <tbb/partitioner.h>                        // for tbb::auto_partitioner
 
 namespace moleculardynamics {
+    namespace compute = boost::compute;
+
     //! A class.
     /*!
         アルゴンに対して、分子動力学シミュレーションを行うクラス
@@ -97,6 +103,12 @@ namespace moleculardynamics {
         */
         void MD_initVel();
 
+        //! A private member function.
+        /*!
+            カーネルを設定する
+        */
+        void SetKernel();
+
         //! A private member function (constant).
         /*!
             ノルムの二乗を求める
@@ -119,7 +131,7 @@ namespace moleculardynamics {
         /*!
             初期のスーパーセルの個数
         */
-        static auto const FIRSTNC = 4;
+        static auto const FIRSTNC = 8;
 
         //! A private member variable (constant).
         /*!
@@ -142,27 +154,9 @@ namespace moleculardynamics {
 
         //! A private member variable (constant).
         /*!
-            標準気圧
-        */
-        static T const ATM;
-
-        //! A private member variable (constant).
-        /*!
-            アボガドロ定数
-        */
-        static T const AVOGADRO_CONSTANT;
-
-        //! A private member variable (constant).
-        /*!
             時間刻みΔt
         */
         static T const DT;
-        
-        //! A private member variable (constant).
-        /*!
-            1Hartree
-        */
-        static T const HARTREE;
         
         //! A private member variable (constant).
         /*!
@@ -172,15 +166,9 @@ namespace moleculardynamics {
         
         //! A private member variable (constant).
         /*!
-            アルゴン原子に対するσ
+            ローカルワークサイズ
         */
-        static T const SIGMA;
-
-        //! A private member variable (constant).
-        /*!
-            アルゴン原子に対するτ
-        */
-        static T const TAU;
+        static auto const LOCALWORKSIZE = 64;
 
         //! A private member variable (constant).
         /*!
@@ -198,13 +186,13 @@ namespace moleculardynamics {
         /*!
             OpenCLデバイス
         */
-        boost::compute::device device_;
+        compute::device device_;
 
         //! A private member variable.
         /*!
             OpenCL context
         */
-        boost::compute::context context_;
+        compute::context context_;
 
         //! A private member variable.
         /*!
@@ -222,37 +210,37 @@ namespace moleculardynamics {
         /*!
             n個目の原子に働く力
         */
-        std::vector<utility::Vector4<T>> F_;
+        std::vector<myvector::Vector4<T>> F_;
         
         //! A private member variable.
         /*!
             n個目の原子に働く力（デバイス側）
         */
-        boost::compute::vector<boost::compute::float4_> F_dev_;
+        compute::vector<compute::float4_> F_dev_;
+        
+        //! A private member variable.
+        /*!
+            周期境界条件をチェックするカーネル
+        */
+        compute::kernel kernel_check_periodic_;
 
         //! A private member variable.
         /*!
             各原子に働く力を計算するカーネル
         */
-        boost::compute::kernel kernel_force_;
-
-        //! A private member variable.
-        /*!
-            各原子に働く力を初期化するカーネル
-        */
-        boost::compute::kernel kernel_initForce_;
-
-        //! A private member variable.
-        /*!
-            修正Euler法で時間発展するカーネル
-        */
-        boost::compute::kernel kernel_move_atoms1_;
+        compute::kernel kernel_force_;
 
         //! A private member variable.
         /*!
             Verlet法で時間発展するカーネル
         */
-        boost::compute::kernel kernel_move_atoms_;
+        compute::kernel kernel_move_atoms_;
+        
+        //! A private member variable.
+        /*!
+            修正Euler法で時間発展するカーネル
+        */
+        compute::kernel kernel_move_atoms1_;
 
         //! A private member variable.
         /*!
@@ -265,7 +253,7 @@ namespace moleculardynamics {
             相互作用を計算するセルの個数
         */
         std::int32_t const ncp_ = 3;
-        
+
         //! A private member variable.
         /*!
             原子数
@@ -280,10 +268,40 @@ namespace moleculardynamics {
         
         //! A private member variable.
         /*!
+            ベクトルの大きさの二乗を求める関数オブジェクト
+        */
+        boost::optional<compute::function<float(compute::float4_)>> pnorm2_;
+
+        //! A private member variable.
+        /*!
             OpenCLのキュー
         */
-        boost::compute::command_queue queue_;
+        compute::command_queue queue_;
 
+        //! A private member variable.
+        /*!
+            n個目の原子の座標
+        */
+        std::vector<myvector::Vector4<T>> r_;
+
+        //! A private member variable.
+        /*!
+        n個目の原子の座標（デバイス側）
+        */
+        compute::vector<compute::float4_> r_dev_;
+
+        //! A private member variable.
+        /*!
+            n個目の原子の初期座標
+        */
+        std::vector<myvector::Vector4<T>> r1_;
+
+        //! A private member variable.
+        /*!
+            n個目の原子の初期座標（デバイス側）
+        */
+        compute::vector<compute::float4_> r1_dev_;
+        
         //! A private member variable (constant).
         /*!
             カットオフ半径
@@ -313,12 +331,6 @@ namespace moleculardynamics {
             格子定数のスケーリングの定数
         */
         T scale_ = Ar_moleculardynamics::FIRSTSCALE;
-        
-        //! A private member variable.
-        /*!
-            時間    
-        */
-        T t_;
 
         //! A private member variable.
         /*!
@@ -332,23 +344,41 @@ namespace moleculardynamics {
         */
         T Tg_;
         
-        //! A private member variable (constant).
+        //! A private member variable.
         /*!
             運動エネルギー
         */
         T Uk_;
 
-        //! A private member variable (constant).
+        //! A private member variable.
         /*!
             ポテンシャルエネルギー
         */
         T Up_;
 
-        //! A private member variable (constant).
+        //! A private member variable.
+        /*!
+            各原子のポテンシャルエネルギー（デバイス側）
+        */
+        compute::vector<float> Up_dev_;
+
+        //! A private member variable.
         /*!
             全エネルギー
         */
         T Utot_;
+        
+        //! A private member variable.
+        /*!
+            n個目の原子の速度
+        */
+        std::vector<myvector::Vector4<T>> V_;
+
+        //! A private member variable.
+        /*!
+            n個目の原子の速度（デバイス側）
+        */
+        compute::vector<compute::float4_> V_dev_;
 
         //! A private member variable (constant).
         /*!
@@ -356,42 +386,6 @@ namespace moleculardynamics {
         */
         T const Vrc_;
         
-        //! A private member variable.
-        /*!
-            n個目の原子の速度
-        */
-        std::vector<utility::Vector4<T>> V_;
-        
-        //! A private member variable.
-        /*!
-            n個目の原子の速度（デバイス側）
-        */
-        boost::compute::vector<boost::compute::float4_> V_dev_;
-
-        //! A private member variable.
-        /*!
-            n個目の原子の座標
-        */
-        std::vector<utility::Vector4<T>> r_;
-
-        //! A private member variable.
-        /*!
-            n個目の原子の座標（デバイス側）
-        */
-        boost::compute::vector<boost::compute::float4_> r_dev_;
-
-        //! A private member variable.
-        /*!
-            n個目の原子の初期座標
-        */
-        std::vector<utility::Vector4<T>> r1_;
-        
-        //! A private member variable.
-        /*!
-            n個目の原子の初期座標（デバイス側）
-        */
-        boost::compute::vector<boost::compute::float4_> r1_dev_;
-
         // #endregion メンバ変数
 
         // #region 禁止されたコンストラクタ・メンバ関数
@@ -425,26 +419,10 @@ namespace moleculardynamics {
     T const Ar_moleculardynamics<T>::ALPHA = 0.2;
 
     template <typename T>
-    T const Ar_moleculardynamics<T>::ATM = 9.86923266716013E-6;
-
-    template <typename T>
-    T const Ar_moleculardynamics<T>::AVOGADRO_CONSTANT = 6.022140857E+23;
-
-    template <typename T>
     T const Ar_moleculardynamics<T>::DT = 0.001;
 
     template <typename T>
-    T const Ar_moleculardynamics<T>::HARTREE = 4.35974465054E-18;
-
-    template <typename T>
     T const Ar_moleculardynamics<T>::KB = 1.3806488E-23;
-
-    template <typename T>
-    T const Ar_moleculardynamics<T>::SIGMA = 3.405E-10;
-
-    template <typename T>
-    T const Ar_moleculardynamics<T>::TAU =
-        std::sqrt(0.039948 / Ar_moleculardynamics<T>::AVOGADRO_CONSTANT * Ar_moleculardynamics<T>::SIGMA * Ar_moleculardynamics<T>::SIGMA / Ar_moleculardynamics<T>::YPSILON);
 
     template <typename T>
     T const Ar_moleculardynamics<T>::YPSILON = 1.6540172624E-21;
@@ -456,7 +434,7 @@ namespace moleculardynamics {
     template <typename T>
     Ar_moleculardynamics<T>::Ar_moleculardynamics()
         :
-        device_(boost::compute::system::default_device()),
+        device_(compute::system::default_device()),
         context_(device_),
         dt2(DT * DT),
         F_(Nc_ * Nc_ * Nc_ * 4),
@@ -466,18 +444,18 @@ namespace moleculardynamics {
         rcm6_(std::pow(rc_, -6.0)),
         rcm12_(std::pow(rc_, -12.0)),
         Tg_(Ar_moleculardynamics::FIRSTTEMP * Ar_moleculardynamics::KB / Ar_moleculardynamics::YPSILON),
-        Vrc_(4.0 * (rcm12_ - rcm6_)),
-        V_(Nc_ * Nc_ * Nc_ * 4),
-        V_dev_(Nc_ * Nc_ * Nc_ * 4, context_),
         r_(Nc_ * Nc_ * Nc_ * 4),
         r_dev_(Nc_ * Nc_ * Nc_ * 4, context_),
         r1_(Nc_ * Nc_ * Nc_ * 4),
-        r1_dev_(Nc_ * Nc_ * Nc_ * 4, context_)
+        r1_dev_(Nc_ * Nc_ * Nc_ * 4, context_),
+        V_(Nc_ * Nc_ * Nc_ * 4),
+        V_dev_(Nc_ * Nc_ * Nc_ * 4, context_),
+        Vrc_(4.0 * (rcm12_ - rcm6_)),
+        Up_dev_(Nc_ * Nc_ * Nc_ * 4, context_)
     {
         // initalize parameters
         lat_ = std::pow(2.0, 2.0 / 3.0) * scale_;
 
-        t_ = 0.0;
         MD_iter_ = 1;
 
         MD_initPos();
@@ -485,118 +463,7 @@ namespace moleculardynamics {
 
         periodiclen_ = lat_ * static_cast<T>(Nc_);
 
-        auto const init_force_source = BOOST_COMPUTE_STRINGIZE_SOURCE(kernel void init_force(__global float4 f[])
-        {
-            int const i = get_global_id(0);
-
-            f[i] = (float4)(0.0f);
-        });
-                
-        kernel_initForce_ = boost::compute::kernel::create_with_source(init_force_source, "init_force", context_);
-        kernel_initForce_.set_args(F_dev_);
-
-        auto const force_source = BOOST_COMPUTE_STRINGIZE_SOURCE(kernel void force(
-            __global float4 f[],
-            __global const float4 r[],
-            int ncp,
-            int numatom,
-            float periodiclen,
-            float rc2)
-        {
-            int const n = get_global_id(0);
-
-            for (int m = 0; m < numatom; m++) {
-
-                // ±ncp分のセル内の原子との相互作用を計算
-                for (int i = -ncp; i <= ncp; i++) {
-                    for (int j = -ncp; j <= ncp; j++) {
-                        for (int k = -ncp; k <= ncp; k++) {
-                            float4 s;
-                            s.x = (float)(i) * periodiclen;
-                            s.y = (float)(j) * periodiclen;
-                            s.z = (float)(k) * periodiclen;
-                            s.w = 0.0f;
-                            
-                            // 自分自身との相互作用を排除
-                            if (n != m || i != 0 || j != 0 || k != 0) {
-                                float4 d = r[n] - (r[m] + s);
-
-                                float const r2 = d.x * d.x + d.y * d.y + d.z * d.z;
-                                // 打ち切り距離内であれば計算
-                                if (r2 <= rc2) {
-                                    float const r = sqrt(r2);
-                                    float const rm6 = 1.0 / (r2 * r2 * r2);
-                                    float const rm7 = rm6 / r;
-                                    float const rm12 = rm6 * rm6;
-                                    float const rm13 = rm12 / r;
-
-                                    float const Fr = 48.0 * rm13 - 24.0 * rm7;
-
-                                    f[n] += d / r * (float4)(Fr);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        kernel_force_ = boost::compute::kernel::create_with_source(force_source, "force", context_);
-        kernel_force_.set_args(
-            F_dev_,
-            r_dev_,
-            ncp_,
-            NumAtom_,
-            periodiclen_,
-            rc2_);
-
-        auto const move_atoms1_source = BOOST_COMPUTE_STRINGIZE_SOURCE(kernel void move_atoms1(
-            __global float4 r[],
-            __global float4 r1[],
-            __global float4 V[],
-            __global float4 const f[],
-            float deltat,
-            float s)
-        {
-            int const n = get_global_id(0);
-            float4 const dt = (float4)(deltat);
-            float4 const dt2 = dt * dt;
-            
-            r1[n] = r[n];
-
-            // scaling of velocity
-            V[n] *= (float4)(s);
-
-            // update coordinates and velocity
-            r[n] += dt * V[n] + (float4)(0.5) * f[n] * dt2;
-
-            V[n] += (float4)(dt) * f[n];
-        });
-
-        kernel_move_atoms1_ = boost::compute::kernel::create_with_source(move_atoms1_source, "move_atoms1", context_);
-
-        auto const move_atoms_source = BOOST_COMPUTE_STRINGIZE_SOURCE(kernel void move_atoms(
-            __global float4 r[],
-            __global float4 r1[],
-            __global float4 V[],
-            __global float4 const f[],
-            float deltat)
-        {
-            int const n = get_global_id(0);
-            float4 const dt = (float4)(deltat);
-            float4 const dt2 = dt * dt;
-
-            float4 const rtmp = r[n];
-
-            // update coordinates and velocity
-            r[n] = (float4)(2.0) * r[n] - r1[n] + f[n] * dt2;
-
-            V[n] = (float4)(0.5) * (r[n] - r1[n]) / dt;
-
-            r1[n] = rtmp;
-        });
-
-        kernel_move_atoms_ = boost::compute::kernel::create_with_source(move_atoms_source, "move_atoms", context_);
+        SetKernel();
     }
 
     // #endregion コンストラクタ
@@ -606,41 +473,15 @@ namespace moleculardynamics {
     template <typename T>
     void Ar_moleculardynamics<T>::Calc_Forces()
     {
-        boost::compute::copy(
-            F_.begin(), F_.end(),
-            F_dev_.begin(),
-            queue_
-            );
-        
-        boost::compute::copy(
-            r_.begin(), r_.end(),
-            r_dev_.begin(),
-            queue_
-            );
-
-        auto const event_init_force = queue_.enqueue_1d_range_kernel(
-            kernel_initForce_,
-            0,
-            NumAtom_,
-            16);
-        event_init_force.wait();
-        
         // 各原子に働く力の初期化
-        //for (auto n = 0; n < NumAtom_; n++) {
-        //    F_[n].data[0] = static_cast<T>(0);
-        //    F_[n].data[1] = static_cast<T>(0);
-        //    F_[n].data[2] = static_cast<T>(0);
-        //}
-
-        auto const event_force = queue_.enqueue_1d_range_kernel(
-            kernel_force_,
-            0,
-            NumAtom_,
-            16);
-        event_force.wait();
+        for (auto n = 0; n < NumAtom_; n++) {
+            F_[n].data[0] = static_cast<T>(0);
+            F_[n].data[1] = static_cast<T>(0);
+            F_[n].data[2] = static_cast<T>(0);
+        }
 
         // ポテンシャルエネルギーの初期化
-        Up_ = 0.0;
+        Up_ = compute::accumulate(Up_dev_.begin(), Up_dev_.end(), 0.0f, queue_);
         tbb::combinable<T> Up;
 
         tbb::parallel_for(
@@ -675,9 +516,9 @@ namespace moleculardynamics {
 
                                     auto const Fr = 48.0 * rm13 - 24.0 * rm7;
 
-                                    //F_[n].data[0] += dx / r * Fr;
-                                    //F_[n].data[1] += dy / r * Fr;
-                                    //F_[n].data[2] += dz / r * Fr;
+                                    F_[n].data[0] += dx / r * Fr;
+                                    F_[n].data[1] += dy / r * Fr;
+                                    F_[n].data[2] += dz / r * Fr;
 
                                     // エネルギーの計算、ただし二重計算のために0.5をかけておく
                                     Up.local() += 0.5 * (4.0 * (rm12 - rm6) - Vrc_);
@@ -691,50 +532,42 @@ namespace moleculardynamics {
             tbb::auto_partitioner());
         
         Up_ = Up.combine(std::plus<T>());
+    }
 
-        boost::compute::copy(
-            F_dev_.begin(), F_dev_.end(),
-            F_.begin(),
-            queue_
-            );
+    template <typename T>
+    void Ar_moleculardynamics<T>::Calc_Forces_OpenCL()
+    {
+        // ホスト→デバイス
+        compute::copy(r_.begin(), r_.end(), r_dev_.begin(), queue_);
+
+        compute::fill(F_dev_.begin(), F_dev_.end(), compute::float4_(0.0f), queue_);
+        compute::fill(Up_dev_.begin(), Up_dev_.end(), 0.0f, queue_);
+        
+        // 各原子に働く力とポテンシャルエネルギーを計算
+        auto const event_force = queue_.enqueue_1d_range_kernel(
+            kernel_force_,
+            0,
+            NumAtom_,
+            Ar_moleculardynamics::LOCALWORKSIZE);
+        event_force.wait();
+
+        // ポテンシャルエネルギーを計算
+        Up_ = compute::accumulate(Up_dev_.begin(), Up_dev_.end(), 0.0f, queue_);
+        
+        // デバイス→ホスト
+        compute::copy(F_dev_.begin(), F_dev_.end(), F_.begin(), queue_);
     }
 
     template <typename T>
     void Ar_moleculardynamics<T>::Move_Atoms()
     {
-        boost::compute::copy(
-            F_.begin(), F_.end(),
-            F_dev_.begin(),
-            queue_
-            );
-
-        boost::compute::copy(
-            r_.begin(), r_.end(),
-            r_dev_.begin(),
-            queue_
-            );
-
-        boost::compute::copy(
-            r1_.begin(), r1_.end(),
-            r1_dev_.begin(),
-            queue_
-            );
-
-        boost::compute::copy(
-            V_.begin(), V_.end(),
-            V_dev_.begin(),
-            queue_
-            );
-
         // 運動エネルギーの初期化
         Uk_ = 0.0;
 
-        // calculate temperture
+        // 運動エネルギーの計算
         for (auto n = 0; n < NumAtom_; n++) {
             Uk_ += norm2(V_[n].data[0], V_[n].data[1], V_[n].data[2]);
         }
-
-        // 運動エネルギーの計算
         Uk_ *= 0.5;
 
         // 全エネルギー（運動エネルギー+ポテンシャルエネルギー）の計算
@@ -748,109 +581,63 @@ namespace moleculardynamics {
         switch (MD_iter_) {
         case 1:
             {
+                // calculate temperture
                 auto const s = std::sqrt((Tg_ + Ar_moleculardynamics::ALPHA * (Tc_ - Tg_)) / Tc_);
+
                 // update the coordinates by the second order Euler method
                 // 最初のステップだけ修正Euler法で時間発展
-                //tbb::parallel_for(
-                //    0,
-                //    NumAtom_,
-                //    1,
-                //    [this, s](std::int32_t n) {
-                //    r1_[n].data[0] = r_[n].data[0];
-                //    r1_[n].data[1] = r_[n].data[1];
-                //    r1_[n].data[2] = r_[n].data[2];
-
-                //    // scaling of velocity
-                //    V_[n].data[0] *= s;
-                //    V_[n].data[1] *= s;
-                //    V_[n].data[2] *= s;
-
-                //    // update coordinates and velocity
-                //    r_[n].data[0] += Ar_moleculardynamics::DT * V_[n].data[0] + 0.5 * F_[n].data[0] * dt2;
-                //    r_[n].data[1] += Ar_moleculardynamics::DT * V_[n].data[1] + 0.5 * F_[n].data[1] * dt2;
-                //    r_[n].data[2] += Ar_moleculardynamics::DT * V_[n].data[2] + 0.5 * F_[n].data[2] * dt2;
-
-                //    V_[n].data[0] += Ar_moleculardynamics::DT * F_[n].data[0];
-                //    V_[n].data[1] += Ar_moleculardynamics::DT * F_[n].data[1];
-                //    V_[n].data[2] += Ar_moleculardynamics::DT * F_[n].data[2];
-                //},
-                //    tbb::auto_partitioner());
-                
-                kernel_move_atoms1_.set_args(
-                    r_dev_,
-                    r1_dev_,
-                    V_dev_,
-                    F_dev_,
-                    Ar_moleculardynamics::DT,
-                    s);
-
-                auto const event_move_atoms1 = queue_.enqueue_1d_range_kernel(
-                    kernel_move_atoms1_,
+                tbb::parallel_for(
                     0,
                     NumAtom_,
-                    16);
-                event_move_atoms1.wait();
+                    1,
+                    [this, s](std::int32_t n) {
+                    r1_[n].data[0] = r_[n].data[0];
+                    r1_[n].data[1] = r_[n].data[1];
+                    r1_[n].data[2] = r_[n].data[2];
+
+                    // scaling of velocity
+                    V_[n].data[0] *= s;
+                    V_[n].data[1] *= s;
+                    V_[n].data[2] *= s;
+
+                    // update coordinates and velocity
+                    r_[n].data[0] += Ar_moleculardynamics::DT * V_[n].data[0] + 0.5 * F_[n].data[0] * dt2;
+                    r_[n].data[1] += Ar_moleculardynamics::DT * V_[n].data[1] + 0.5 * F_[n].data[1] * dt2;
+                    r_[n].data[2] += Ar_moleculardynamics::DT * V_[n].data[2] + 0.5 * F_[n].data[2] * dt2;
+
+                    V_[n].data[0] += Ar_moleculardynamics::DT * F_[n].data[0];
+                    V_[n].data[1] += Ar_moleculardynamics::DT * F_[n].data[1];
+                    V_[n].data[2] += Ar_moleculardynamics::DT * F_[n].data[2];
+                },
+                    tbb::auto_partitioner());
             }
             break;
 
         default:
-            {
-                // update the coordinates by the Verlet method
-                //tbb::parallel_for(
-                //    0,
-                //    NumAtom_,
-                //    1,
-                //    [this](std::int32_t n) {
-                //    auto const rtmp = r_[n].data;
-
-                //    // update coordinates and velocity
-                //    r_[n].data[0] = 2.0 * r_[n].data[0] - r1_[n].data[0] + F_[n].data[0] * dt2;
-                //    r_[n].data[1] = 2.0 * r_[n].data[1] - r1_[n].data[1] + F_[n].data[1] * dt2;
-                //    r_[n].data[2] = 2.0 * r_[n].data[2] - r1_[n].data[2] + F_[n].data[2] * dt2;
-
-                //    V_[n].data[0] = 0.5 * (r_[n].data[0] - r1_[n].data[0]) / Ar_moleculardynamics::DT;
-                //    V_[n].data[1] = 0.5 * (r_[n].data[1] - r1_[n].data[1]) / Ar_moleculardynamics::DT;
-                //    V_[n].data[2] = 0.5 * (r_[n].data[2] - r1_[n].data[2]) / Ar_moleculardynamics::DT;
-
-                //    r1_[n].data[0] = rtmp[0];
-                //    r1_[n].data[1] = rtmp[1];
-                //    r1_[n].data[2] = rtmp[2];
-                //},
-                //    tbb::auto_partitioner());
-                kernel_move_atoms_.set_args(
-                    r_dev_,
-                    r1_dev_,
-                    V_dev_,
-                    F_dev_,
-                    Ar_moleculardynamics::DT);
-
-                auto const event_move_atoms = queue_.enqueue_1d_range_kernel(
-                    kernel_move_atoms_,
-                    0,
-                    NumAtom_,
-                    16);
-                event_move_atoms.wait();
-            }
+            // update the coordinates by the Verlet method
+            tbb::parallel_for(
+                0,
+                NumAtom_,
+                1,
+                [this](std::int32_t n) {
+                    auto const rtmp = r_[n].data;
+            
+                    // update coordinates and velocity
+                    r_[n].data[0] = 2.0 * r_[n].data[0] - r1_[n].data[0] + F_[n].data[0] * dt2;
+                    r_[n].data[1] = 2.0 * r_[n].data[1] - r1_[n].data[1] + F_[n].data[1] * dt2;
+                    r_[n].data[2] = 2.0 * r_[n].data[2] - r1_[n].data[2] + F_[n].data[2] * dt2;
+            
+                    V_[n].data[0] = 0.5 * (r_[n].data[0] - r1_[n].data[0]) / Ar_moleculardynamics::DT;
+                    V_[n].data[1] = 0.5 * (r_[n].data[1] - r1_[n].data[1]) / Ar_moleculardynamics::DT;
+                    V_[n].data[2] = 0.5 * (r_[n].data[2] - r1_[n].data[2]) / Ar_moleculardynamics::DT;
+            
+                    r1_[n].data[0] = rtmp[0];
+                    r1_[n].data[1] = rtmp[1];
+                    r1_[n].data[2] = rtmp[2];
+                },
+                tbb::auto_partitioner());
             break;
         }
-
-        boost::compute::copy(
-            r_dev_.begin(), r_dev_.end(),
-            r_.begin(),
-            queue_
-            );
-
-        boost::compute::copy(
-            r1_dev_.begin(), r1_dev_.end(),
-            r1_.begin(),
-            queue_
-            );
-
-        boost::compute::copy(
-            V_dev_.begin(), V_dev_.end(),
-            V_.begin(),
-            queue_
-            );
 
         // consider the periodic boundary condination
         // セルの外側に出たら座標をセル内に戻す
@@ -871,10 +658,79 @@ namespace moleculardynamics {
             }
         },
             tbb::auto_partitioner());
+    }
 
-        // 繰り返し回数と時間を増加
-        t_ = static_cast<T>(MD_iter_) * Ar_moleculardynamics::DT;
-        MD_iter_++;
+    template <typename T>
+    void Ar_moleculardynamics<T>::Move_Atoms_OpenCL()
+    {
+        // ホスト→デバイス
+        compute::copy(r_.begin(), r_.end(), r_dev_.begin(), queue_ );
+        compute::copy(r1_.begin(), r1_.end(), r1_dev_.begin(), queue_ );
+        compute::copy(V_.begin(), V_.end(), V_dev_.begin(), queue_);
+
+        // 運動エネルギーの計算
+        compute::vector<float> V2_dev_(NumAtom_, context_);
+        compute::transform(V_dev_.begin(), V_dev_.end(), V2_dev_.begin(), *pnorm2_, queue_);
+        Uk_ = compute::accumulate(V2_dev_.begin(), V2_dev_.end(), 0.0f, queue_) * 0.5;
+
+        // 全エネルギー（運動エネルギー+ポテンシャルエネルギー）の計算
+        Utot_ = Uk_ + Up_;
+
+        printf("全エネルギー = %.15f\n", Utot_);
+
+        // 温度の計算
+        Tc_ = Uk_ / (1.5 * static_cast<T>(NumAtom_));
+
+        switch (MD_iter_) {
+        case 1:
+            {
+                // calculate temperture
+                auto const s = std::sqrt((Tg_ + Ar_moleculardynamics::ALPHA * (Tc_ - Tg_)) / Tc_);
+                
+                // update the coordinates by the second order Euler method
+                // 最初のステップだけ修正Euler法で時間発展
+                kernel_move_atoms1_.set_args(
+                    r_dev_,
+                    r1_dev_,
+                    V_dev_,
+                    F_dev_,
+                    Ar_moleculardynamics::DT,
+                    s);
+
+                auto const event_move_atoms1 = queue_.enqueue_1d_range_kernel(
+                    kernel_move_atoms1_,
+                    0,
+                    NumAtom_,
+                    Ar_moleculardynamics::LOCALWORKSIZE);
+                event_move_atoms1.wait();
+            }
+        break;
+
+        default:
+            {
+                // update the coordinates by the Verlet method
+                auto const event_move_atoms = queue_.enqueue_1d_range_kernel(
+                    kernel_move_atoms_,
+                    0,
+                    NumAtom_,
+                    Ar_moleculardynamics::LOCALWORKSIZE);
+                event_move_atoms.wait();
+            }
+        break;
+        }
+
+        // 周期境界条件のチェック
+        auto const event_check_periodic = queue_.enqueue_1d_range_kernel(
+            kernel_check_periodic_,
+            0,
+            NumAtom_,
+            Ar_moleculardynamics::LOCALWORKSIZE);
+        event_check_periodic.wait();
+
+        // デバイス→ホスト
+        compute::copy(r_dev_.begin(), r_dev_.end(), r_.begin(), queue_);
+        compute::copy(r1_dev_.begin(), r1_dev_.end(), r1_.begin(), queue_);
+        compute::copy(V_dev_.begin(), V_dev_.end(), V_.begin(), queue_);
     }
 
     // #endregion publicメンバ関数
@@ -961,7 +817,7 @@ namespace moleculardynamics {
             rndZ *= tmp;
             
             // 方向はランダムに与える
-            return utility::Vector4<T>(v * rndX, v * rndY, v * rndZ);
+            return myvector::Vector4<T>(v * rndX, v * rndY, v * rndZ);
         };
 
         boost::generate(V_, generator4);
@@ -986,6 +842,168 @@ namespace moleculardynamics {
             V_[n].data[1] -= sy;
             V_[n].data[2] -= sz;
         }
+    }
+
+    template <typename T>  
+    void Ar_moleculardynamics<T>::SetKernel()
+    {
+        using namespace boost::compute;
+
+        auto const check_periodic_source = BOOST_COMPUTE_STRINGIZE_SOURCE(kernel void check_periodic(
+            __global float4 r[],
+            __global float4 r1[],
+            __const float periodiclen)
+        {
+            int const n = get_global_id(0);
+
+            if (r[n].x > periodiclen) {
+                r[n].x -= periodiclen;
+                r1[n].x -= periodiclen;
+            }
+            else if (r[n].x < 0.0f) {
+                r[n].x += periodiclen;
+                r1[n].x += periodiclen;
+            }
+
+            if (r[n].y > periodiclen) {
+                r[n].y -= periodiclen;
+                r1[n].y -= periodiclen;
+            }
+            else if (r[n].y < 0.0f) {
+                r[n].y += periodiclen;
+                r1[n].y += periodiclen;
+            }
+
+            if (r[n].z > periodiclen) {
+                r[n].z -= periodiclen;
+                r1[n].z -= periodiclen;
+            }
+            else if (r[n].z < 0.0f) {
+                r[n].z += periodiclen;
+                r1[n].z += periodiclen;
+            }
+        });
+
+        kernel_check_periodic_ = kernel::create_with_source(check_periodic_source, "check_periodic", context_);
+        kernel_check_periodic_.set_args(r_dev_, r1_dev_, periodiclen_);
+
+        auto const force_source = BOOST_COMPUTE_STRINGIZE_SOURCE(kernel void force(
+            __global float4 f[],
+            __global float Up[],
+            __global __const float4 r[],
+            __const int ncp,
+            __const int numatom,
+            __const float periodiclen,
+            __const float rc2,
+            __const float Vrc)
+        {
+            int const n = get_global_id(0);
+
+            for (int m = 0; m < numatom; m++) {
+
+                // ±ncp分のセル内の原子との相互作用を計算
+                for (int i = -ncp; i <= ncp; i++) {
+                    for (int j = -ncp; j <= ncp; j++) {
+                        for (int k = -ncp; k <= ncp; k++) {
+                            float4 s;
+                            s.x = (float)(i)* periodiclen;
+                            s.y = (float)(j)* periodiclen;
+                            s.z = (float)(k)* periodiclen;
+                            s.w = 0.0f;
+
+                            // 自分自身との相互作用を排除
+                            if (n != m || i != 0 || j != 0 || k != 0) {
+                                float4 const d = r[n] - (r[m] + s);
+
+                                float const r2 = d.x * d.x + d.y * d.y + d.z * d.z;
+                                // 打ち切り距離内であれば計算
+                                if (r2 <= rc2) {
+                                    float const r = sqrt(r2);
+                                    float const rm6 = 1.0 / (r2 * r2 * r2);
+                                    float const rm7 = rm6 / r;
+                                    float const rm12 = rm6 * rm6;
+                                    float const rm13 = rm12 / r;
+
+                                    float const Fr = 48.0 * rm13 - 24.0 * rm7;
+
+                                    f[n] += d / r * (float4)(Fr);
+                                    Up[n] += 0.5 * (4.0 * (rm12 - rm6) - Vrc);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        kernel_force_ = kernel::create_with_source(force_source, "force", context_);
+        kernel_force_.set_args(
+            F_dev_,
+            Up_dev_,
+            r_dev_,
+            ncp_,
+            NumAtom_,
+            periodiclen_,
+            rc2_,
+            Vrc_);
+
+        auto const move_atoms_source = BOOST_COMPUTE_STRINGIZE_SOURCE(kernel void move_atoms(
+            __global float4 r[],
+            __global float4 r1[],
+            __global float4 V[],
+            __global __const float4 f[],
+            __const float deltat)
+        {
+            int const n = get_global_id(0);
+            float4 const dt = (float4)(deltat);
+            float4 const dt2 = dt * dt;
+
+            float4 const rtmp = r[n];
+
+            // update coordinates and velocity
+            r[n] = (float4)(2.0) * r[n] - r1[n] + f[n] * dt2;
+
+            V[n] = (float4)(0.5) * (r[n] - r1[n]) / dt;
+
+            r1[n] = rtmp;
+        });
+
+        kernel_move_atoms_ = kernel::create_with_source(move_atoms_source, "move_atoms", context_);
+
+        auto const move_atoms1_source = BOOST_COMPUTE_STRINGIZE_SOURCE(kernel void move_atoms1(
+            __global float4 r[],
+            __global float4 r1[],
+            __global float4 V[],
+            __global __const float4 f[],
+            __const float deltat,
+            __const float s)
+        {
+            int const n = get_global_id(0);
+            float4 const dt = (float4)(deltat);
+            float4 const dt2 = dt * dt;
+
+            r1[n] = r[n];
+
+            // scaling of velocity
+            V[n] *= (float4)(s);
+
+            // update coordinates and velocity
+            r[n] += dt * V[n] + (float4)(0.5) * f[n] * dt2;
+
+            V[n] += (float4)(dt)* f[n];
+        });
+
+        kernel_move_atoms1_ = kernel::create_with_source(move_atoms1_source, "move_atoms1", context_);
+        kernel_move_atoms_.set_args(
+            r_dev_,
+            r1_dev_,
+            V_dev_,
+            F_dev_,
+            Ar_moleculardynamics::DT);
+
+        pnorm2_ = boost::in_place(make_function_from_source<float(float4_)>(
+            "norm2",
+            "float norm2(float4 v) { return v.x * v.x + v.y * v.y + v.z * v.z; }"));
     }
 
     // #endregion privateメンバ関数
