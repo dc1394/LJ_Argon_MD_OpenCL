@@ -1,19 +1,39 @@
+#include "checkpoint.h"
 #include "moleculardynamics/Ar_moleculardynamics.h"
-#include <chrono>
 #include <iostream>
+
+namespace {
+    static auto constexpr LOOP = 25;
+}
 
 int main()
 {
+    checkpoint::CheckPoint cp;
+    cp.checkpoint("èàóùäJén", __LINE__);
+
     moleculardynamics::Ar_moleculardynamics<float> armd;
     
-    std::chrono::time_point<std::chrono::system_clock> begin(std::chrono::system_clock::now());
-    for (auto i = 0; i < 20; i++) {
+    cp.checkpoint("èâä˙âªèàóù", __LINE__);
+
+    for (auto i = 0; i < LOOP; i++) {
         armd.Calc_Forces();
         armd.Move_Atoms();
     }
 
-    const auto end = std::chrono::system_clock::now();
-    std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << std::endl;
+    cp.checkpoint("TBBÇ≈ï¿óÒâª", __LINE__);
+
+    armd.reset();
+
+    cp.checkpoint("çƒèâä˙âª", __LINE__);
+
+    for (auto i = 0; i < LOOP; i++) {
+        armd.Calc_Forces_OpenCL();
+        armd.Move_Atoms_OpenCL();
+    }
+
+    cp.checkpoint("OpenCLÇ≈ï¿óÒâª", __LINE__);
+
+    cp.checkpoint_print();
 
     return 0;
 }

@@ -14,16 +14,18 @@
 #include "../myvector/vector4.h"
 #include <array>                                    // for std::array
 #include <cstdint>                                  // for std::int32_t
-#include <vector>                                   // for std::vector
 #include <cmath>                                    // for std::sqrt, std::pow
-#include <boost/compute/algorithm/accumulate.hpp>   // for compute::accumulate
-#include <boost/compute/algorithm/fill.hpp>         // for compute::fill
-#include <boost/compute/algorithm/transform.hpp>
-#include <boost/compute/container/vector.hpp>       // for compute::vector
+#include <iostream>                                 // for std::ios_base::fixed, std::ios_base::floatfield, std::cout
+#include <vector>                                   // for std::vector
+#include <boost/compute/algorithm/accumulate.hpp>   // for boost::compute::accumulate
+#include <boost/compute/algorithm/fill.hpp>         // for boost::compute::fill
+#include <boost/compute/algorithm/transform.hpp>    // for boost::compute::transform
+#include <boost/compute/container/vector.hpp>       // for boost::compute::vector
 #include <boost/compute/utility/source.hpp>         // for BOOST_COMPUTE_STRINGIZE_SOURCE
+#include <boost/format.hpp>                         // for boost::format
 #include <boost/optional.hpp>                       // for boost::optional
-#include <boost/utility/in_place_factory.hpp>       // for boost::in_place
 #include <boost/range/algorithm/generate.hpp>       // for boost::generate
+#include <boost/utility/in_place_factory.hpp>       // for boost::in_place
 #include <tbb/combinable.h>                         // for tbb::combinable
 #include <tbb/parallel_for.h>                       // for tbb::parallel_for
 #include <tbb/partitioner.h>                        // for tbb::auto_partitioner
@@ -80,17 +82,17 @@ namespace moleculardynamics {
         */
         void Move_Atoms_OpenCL();
         
+        //! A public member function.
+        /*!
+            再計算する
+        */
+        void reset();
+
         // #endregion publicメンバ関数
 
         // #region privateメンバ関数
 
     private:
-        //! A private member function.
-        /*!
-            初期化する
-        */
-        void MD_init();
-                
         //! A private member function.
         /*!
             原子の初期位置を決める
@@ -168,7 +170,7 @@ namespace moleculardynamics {
         /*!
             ローカルワークサイズ
         */
-        static auto const LOCALWORKSIZE = 64;
+        static auto const LOCALWORKSIZE = 128;
 
         //! A private member variable (constant).
         /*!
@@ -286,7 +288,13 @@ namespace moleculardynamics {
 
         //! A private member variable.
         /*!
-        n個目の原子の座標（デバイス側）
+            n個目の原子の座標の複製
+        */
+        std::vector<myvector::Vector4<T>> r_clone_;
+
+        //! A private member variable.
+        /*!
+            n個目の原子の座標（デバイス側）
         */
         compute::vector<compute::float4_> r_dev_;
 
@@ -376,6 +384,12 @@ namespace moleculardynamics {
 
         //! A private member variable.
         /*!
+            n個目の原子の速度（複製用）
+        */
+        std::vector<myvector::Vector4<T>> V_clone_;
+
+        //! A private member variable.
+        /*!
             n個目の原子の速度（デバイス側）
         */
         compute::vector<compute::float4_> V_dev_;
@@ -445,13 +459,15 @@ namespace moleculardynamics {
         rcm12_(std::pow(rc_, -12.0)),
         Tg_(Ar_moleculardynamics::FIRSTTEMP * Ar_moleculardynamics::KB / Ar_moleculardynamics::YPSILON),
         r_(Nc_ * Nc_ * Nc_ * 4),
+        r_clone_(Nc_ * Nc_ * Nc_ * 4),
         r_dev_(Nc_ * Nc_ * Nc_ * 4, context_),
         r1_(Nc_ * Nc_ * Nc_ * 4),
         r1_dev_(Nc_ * Nc_ * Nc_ * 4, context_),
+        Up_dev_(Nc_ * Nc_ * Nc_ * 4, context_),
         V_(Nc_ * Nc_ * Nc_ * 4),
+        V_clone_(Nc_ * Nc_ * Nc_ * 4),
         V_dev_(Nc_ * Nc_ * Nc_ * 4, context_),
-        Vrc_(4.0 * (rcm12_ - rcm6_)),
-        Up_dev_(Nc_ * Nc_ * Nc_ * 4, context_)
+        Vrc_(4.0 * (rcm12_ - rcm6_))
     {
         // initalize parameters
         lat_ = std::pow(2.0, 2.0 / 3.0) * scale_;
@@ -481,7 +497,6 @@ namespace moleculardynamics {
         }
 
         // ポテンシャルエネルギーの初期化
-        Up_ = compute::accumulate(Up_dev_.begin(), Up_dev_.end(), 0.0f, queue_);
         tbb::combinable<T> Up;
 
         tbb::parallel_for(
@@ -573,7 +588,7 @@ namespace moleculardynamics {
         // 全エネルギー（運動エネルギー+ポテンシャルエネルギー）の計算
         Utot_ = Uk_ + Up_;
 
-        printf("全エネルギー = %.15f\n", Utot_);
+        std::cout << boost::format("MDステップ = %d, ポテンシャル = %.8f, 運動エネルギー = %.8f\n") % MD_iter_ % Up_ % Uk_;
 
         // 温度の計算
         Tc_ = Uk_ / (1.5 * static_cast<T>(NumAtom_));
@@ -658,6 +673,8 @@ namespace moleculardynamics {
             }
         },
             tbb::auto_partitioner());
+
+        MD_iter_++;
     }
 
     template <typename T>
@@ -676,7 +693,7 @@ namespace moleculardynamics {
         // 全エネルギー（運動エネルギー+ポテンシャルエネルギー）の計算
         Utot_ = Uk_ + Up_;
 
-        printf("全エネルギー = %.15f\n", Utot_);
+        std::cout << boost::format("MDステップ = %d, ポテンシャル = %.8f, 運動エネルギー = %.8f\n") % MD_iter_ % Up_ % Uk_;
 
         // 温度の計算
         Tc_ = Uk_ / (1.5 * static_cast<T>(NumAtom_));
@@ -731,6 +748,17 @@ namespace moleculardynamics {
         compute::copy(r_dev_.begin(), r_dev_.end(), r_.begin(), queue_);
         compute::copy(r1_dev_.begin(), r1_dev_.end(), r1_.begin(), queue_);
         compute::copy(V_dev_.begin(), V_dev_.end(), V_.begin(), queue_);
+
+        MD_iter_++;
+    }
+
+    template <typename T>
+    void Ar_moleculardynamics<T>::reset()
+    {
+        MD_iter_ = 1;
+        
+        r_.assign(r_clone_.begin(), r_clone_.end());
+        V_.assign(V_clone_.begin(), V_clone_.end());
     }
 
     // #endregion publicメンバ関数
@@ -798,6 +826,9 @@ namespace moleculardynamics {
             r_[n].data[1] -= sy;
             r_[n].data[2] -= sz;
         }
+
+        // 原子座標を複製
+        r_clone_.assign(r_.begin(), r_.end());
     }
 
     template <typename T>
@@ -842,6 +873,9 @@ namespace moleculardynamics {
             V_[n].data[1] -= sy;
             V_[n].data[2] -= sz;
         }
+
+        // 速度の可変長配列を複製
+        V_clone_.assign(V_.begin(), V_.end());
     }
 
     template <typename T>  
