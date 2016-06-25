@@ -12,7 +12,6 @@
 
 #include "../myrandom/myrand.h"
 #include "../myvector/vector4.h"
-#include <array>                                    // for std::array
 #include <cstdint>                                  // for std::int32_t
 #include <cmath>                                    // for std::sqrt, std::pow
 #include <iostream>                                 // for std::ios_base::fixed, std::ios_base::floatfield, std::cout
@@ -84,7 +83,7 @@ namespace moleculardynamics {
         
         //! A public member function.
         /*!
-            再計算する
+            初期化する
         */
         void reset();
 
@@ -593,40 +592,38 @@ namespace moleculardynamics {
         // 温度の計算
         Tc_ = Uk_ / (1.5 * static_cast<T>(NumAtom_));
 
+        // calculate temperture
+        auto const s = std::sqrt((Tg_ + Ar_moleculardynamics::ALPHA * (Tc_ - Tg_)) / Tc_);
+
         switch (MD_iter_) {
         case 1:
-            {
-                // calculate temperture
-                auto const s = std::sqrt((Tg_ + Ar_moleculardynamics::ALPHA * (Tc_ - Tg_)) / Tc_);
+            // update the coordinates by the second order Euler method
+            // 最初のステップだけ修正Euler法で時間発展
+            tbb::parallel_for(
+                0,
+                NumAtom_,
+                1,
+                [this, s](std::int32_t n) {
+                r1_[n].data[0] = r_[n].data[0];
+                r1_[n].data[1] = r_[n].data[1];
+                r1_[n].data[2] = r_[n].data[2];
 
-                // update the coordinates by the second order Euler method
-                // 最初のステップだけ修正Euler法で時間発展
-                tbb::parallel_for(
-                    0,
-                    NumAtom_,
-                    1,
-                    [this, s](std::int32_t n) {
-                    r1_[n].data[0] = r_[n].data[0];
-                    r1_[n].data[1] = r_[n].data[1];
-                    r1_[n].data[2] = r_[n].data[2];
+                // scaling of velocity
+                V_[n].data[0] *= s;
+                V_[n].data[1] *= s;
+                V_[n].data[2] *= s;
 
-                    // scaling of velocity
-                    V_[n].data[0] *= s;
-                    V_[n].data[1] *= s;
-                    V_[n].data[2] *= s;
+                // update coordinates and velocity
+                r_[n].data[0] += Ar_moleculardynamics::DT * V_[n].data[0] + 0.5 * F_[n].data[0] * dt2;
+                r_[n].data[1] += Ar_moleculardynamics::DT * V_[n].data[1] + 0.5 * F_[n].data[1] * dt2;
+                r_[n].data[2] += Ar_moleculardynamics::DT * V_[n].data[2] + 0.5 * F_[n].data[2] * dt2;
 
-                    // update coordinates and velocity
-                    r_[n].data[0] += Ar_moleculardynamics::DT * V_[n].data[0] + 0.5 * F_[n].data[0] * dt2;
-                    r_[n].data[1] += Ar_moleculardynamics::DT * V_[n].data[1] + 0.5 * F_[n].data[1] * dt2;
-                    r_[n].data[2] += Ar_moleculardynamics::DT * V_[n].data[2] + 0.5 * F_[n].data[2] * dt2;
-
-                    V_[n].data[0] += Ar_moleculardynamics::DT * F_[n].data[0];
-                    V_[n].data[1] += Ar_moleculardynamics::DT * F_[n].data[1];
-                    V_[n].data[2] += Ar_moleculardynamics::DT * F_[n].data[2];
-                },
-                    tbb::auto_partitioner());
-            }
-            break;
+                V_[n].data[0] += Ar_moleculardynamics::DT * F_[n].data[0];
+                V_[n].data[1] += Ar_moleculardynamics::DT * F_[n].data[1];
+                V_[n].data[2] += Ar_moleculardynamics::DT * F_[n].data[2];
+            },
+                tbb::auto_partitioner());
+        break;
 
         default:
             // update the coordinates by the Verlet method
@@ -634,13 +631,14 @@ namespace moleculardynamics {
                 0,
                 NumAtom_,
                 1,
-                [this](std::int32_t n) {
+                [this, s](std::int32_t n) {
                     auto const rtmp = r_[n].data;
             
                     // update coordinates and velocity
-                    r_[n].data[0] = 2.0 * r_[n].data[0] - r1_[n].data[0] + F_[n].data[0] * dt2;
-                    r_[n].data[1] = 2.0 * r_[n].data[1] - r1_[n].data[1] + F_[n].data[1] * dt2;
-                    r_[n].data[2] = 2.0 * r_[n].data[2] - r1_[n].data[2] + F_[n].data[2] * dt2;
+                    // Verlet法の座標更新式において速度成分を抜き出し、その部分をスケールする
+                    r_[n].data[0] += s * (r_[n].data[0] - r1_[n].data[0]) + F_[n].data[0] * dt2;
+                    r_[n].data[1] += s * (r_[n].data[1] - r1_[n].data[1]) + F_[n].data[1] * dt2;
+                    r_[n].data[2] += s * (r_[n].data[2] - r1_[n].data[2]) + F_[n].data[2] * dt2;
             
                     V_[n].data[0] = 0.5 * (r_[n].data[0] - r1_[n].data[0]) / Ar_moleculardynamics::DT;
                     V_[n].data[1] = 0.5 * (r_[n].data[1] - r1_[n].data[1]) / Ar_moleculardynamics::DT;
@@ -698,12 +696,12 @@ namespace moleculardynamics {
         // 温度の計算
         Tc_ = Uk_ / (1.5 * static_cast<T>(NumAtom_));
 
+        // calculate temperture
+        auto const s = std::sqrt((Tg_ + Ar_moleculardynamics::ALPHA * (Tc_ - Tg_)) / Tc_);
+
         switch (MD_iter_) {
         case 1:
             {
-                // calculate temperture
-                auto const s = std::sqrt((Tg_ + Ar_moleculardynamics::ALPHA * (Tc_ - Tg_)) / Tc_);
-                
                 // update the coordinates by the second order Euler method
                 // 最初のステップだけ修正Euler法で時間発展
                 kernel_move_atoms1_.set_args(
@@ -726,6 +724,14 @@ namespace moleculardynamics {
         default:
             {
                 // update the coordinates by the Verlet method
+                kernel_move_atoms_.set_args(
+                    r_dev_,
+                    r1_dev_,
+                    V_dev_,
+                    F_dev_,
+                    Ar_moleculardynamics::DT,
+                    s);
+
                 auto const event_move_atoms = queue_.enqueue_1d_range_kernel(
                     kernel_move_atoms_,
                     0,
@@ -940,9 +946,9 @@ namespace moleculardynamics {
                     for (int j = -ncp; j <= ncp; j++) {
                         for (int k = -ncp; k <= ncp; k++) {
                             float4 s;
-                            s.x = (float)(i)* periodiclen;
-                            s.y = (float)(j)* periodiclen;
-                            s.z = (float)(k)* periodiclen;
+                            s.x = (float)(i) * periodiclen;
+                            s.y = (float)(j) * periodiclen;
+                            s.z = (float)(k) * periodiclen;
                             s.w = 0.0f;
 
                             // 自分自身との相互作用を排除
@@ -986,18 +992,19 @@ namespace moleculardynamics {
             __global float4 r1[],
             __global float4 V[],
             __global __const float4 f[],
-            __const float deltat)
+            __const float deltat,
+            __const float s)
         {
             int const n = get_global_id(0);
             float4 const dt = (float4)(deltat);
             float4 const dt2 = dt * dt;
-
             float4 const rtmp = r[n];
 
             // update coordinates and velocity
-            r[n] = (float4)(2.0) * r[n] - r1[n] + f[n] * dt2;
+            // Verlet法の座標更新式において速度成分を抜き出し、その部分をスケールする
+            r[n] += (float4)(s) * (r[n] - r1[n]) + f[n] * dt2;
 
-            V[n] = (float4)(0.5) * (r[n] - r1[n]) / dt;
+            V[n] = (float4)(0.5f) * (r[n] - r1[n]) / dt;
 
             r1[n] = rtmp;
         });
@@ -1022,18 +1029,12 @@ namespace moleculardynamics {
             V[n] *= (float4)(s);
 
             // update coordinates and velocity
-            r[n] += dt * V[n] + (float4)(0.5) * f[n] * dt2;
+            r[n] += dt * V[n] + (float4)(0.5f) * f[n] * dt2;
 
             V[n] += (float4)(dt)* f[n];
         });
 
         kernel_move_atoms1_ = kernel::create_with_source(move_atoms1_source, "move_atoms1", context_);
-        kernel_move_atoms_.set_args(
-            r_dev_,
-            r1_dev_,
-            V_dev_,
-            F_dev_,
-            Ar_moleculardynamics::DT);
 
         pnorm2_ = boost::in_place(make_function_from_source<float(float4_)>(
             "norm2",

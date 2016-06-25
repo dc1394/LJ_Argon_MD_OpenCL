@@ -1,6 +1,5 @@
 #include "checkpoint.h"
 #include "moleculardynamics/Ar_moleculardynamics.h"
-#include <iostream>
 
 namespace {
     static auto constexpr LOOP = 25;
