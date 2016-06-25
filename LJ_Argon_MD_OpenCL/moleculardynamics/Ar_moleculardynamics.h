@@ -1,7 +1,7 @@
 ﻿/*! \file Ar_moleculardynamics.h
     \brief アルゴンに対して、分子動力学シミュレーションを行うクラスの宣言
 
-    Copyright ©  2015 @dc1394 All Rights Reserved.
+    Copyright ©  2016 @dc1394 All Rights Reserved.
     This software is released under the BSD 2-Clause License.
 */
 
@@ -930,7 +930,7 @@ namespace moleculardynamics {
         auto const force_source = BOOST_COMPUTE_STRINGIZE_SOURCE(kernel void force(
             __global float4 f[],
             __global float Up[],
-            __global __const float4 r[],
+            __global __const float4 rv[],
             __const int ncp,
             __const int numatom,
             __const float periodiclen,
@@ -953,9 +953,9 @@ namespace moleculardynamics {
 
                             // 自分自身との相互作用を排除
                             if (n != m || i != 0 || j != 0 || k != 0) {
-                                float4 const d = r[n] - (r[m] + s);
+                                float4 const d = rv[n] - (rv[m] + s);
 
-                                float const r2 = d.x * d.x + d.y * d.y + d.z * d.z;
+                                float const r2 = dot(d, d);
                                 // 打ち切り距離内であれば計算
                                 if (r2 <= rc2) {
                                     float const r = sqrt(r2);
@@ -966,7 +966,7 @@ namespace moleculardynamics {
 
                                     float const Fr = 48.0 * rm13 - 24.0 * rm7;
 
-                                    f[n] += d / r * (float4)(Fr);
+                                    f[n] += d / (float4)(r) * (float4)(Fr);
                                     Up[n] += 0.5 * (4.0 * (rm12 - rm6) - Vrc);
                                 }
                             }
