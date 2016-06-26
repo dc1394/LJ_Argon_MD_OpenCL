@@ -604,9 +604,7 @@ namespace moleculardynamics {
                 NumAtom_,
                 1,
                 [this, s](std::int32_t n) {
-                r1_[n].data[0] = r_[n].data[0];
-                r1_[n].data[1] = r_[n].data[1];
-                r1_[n].data[2] = r_[n].data[2];
+                r1_[n].data = r_[n].data;
 
                 // scaling of velocity
                 V_[n].data[0] *= s;
@@ -644,9 +642,7 @@ namespace moleculardynamics {
                     V_[n].data[1] = 0.5 * (r_[n].data[1] - r1_[n].data[1]) / Ar_moleculardynamics::DT;
                     V_[n].data[2] = 0.5 * (r_[n].data[2] - r1_[n].data[2]) / Ar_moleculardynamics::DT;
             
-                    r1_[n].data[0] = rtmp[0];
-                    r1_[n].data[1] = rtmp[1];
-                    r1_[n].data[2] = rtmp[2];
+                    r1_[n].data = rtmp;
                 },
                 tbb::auto_partitioner());
             break;
