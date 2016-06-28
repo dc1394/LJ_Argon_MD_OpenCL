@@ -2,7 +2,7 @@
 #include "moleculardynamics/Ar_moleculardynamics.h"
 
 namespace {
-    static auto constexpr LOOP = 25;
+    static auto constexpr LOOP = 100;
 }
 
 int main()
@@ -33,6 +33,8 @@ int main()
     cp.checkpoint("OpenCL‚Å•À—ñ‰»", __LINE__);
 
     cp.checkpoint_print();
+    
+    armd.getinfo();
 
     return 0;
 }
