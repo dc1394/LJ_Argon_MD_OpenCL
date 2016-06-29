@@ -71,6 +71,12 @@ namespace moleculardynamics {
 
         //! A public member function.
         /*!
+            OpenCLについての情報を表示する
+        */
+        void getinfo() const;
+
+        //! A public member function.
+        /*!
             原子を移動させる
         */
         void Move_Atoms();
@@ -132,7 +138,7 @@ namespace moleculardynamics {
         /*!
             初期のスーパーセルの個数
         */
-        static auto const FIRSTNC = 8;
+        static auto constexpr FIRSTNC = 6;
 
         //! A private member variable (constant).
         /*!
@@ -169,7 +175,7 @@ namespace moleculardynamics {
         /*!
             ローカルワークサイズ
         */
-        static auto const LOCALWORKSIZE = 128;
+        static auto constexpr LOCALWORKSIZE = 96;
 
         //! A private member variable (constant).
         /*!
@@ -426,7 +432,7 @@ namespace moleculardynamics {
     T const Ar_moleculardynamics<T>::FIRSTSCALE = 1.0;
     
     template <typename T>
-    T const Ar_moleculardynamics<T>::FIRSTTEMP = 50.0;
+    T const Ar_moleculardynamics<T>::FIRSTTEMP = 1.0;
 
     template <typename T>
     T const Ar_moleculardynamics<T>::ALPHA = 0.2;
@@ -573,6 +579,25 @@ namespace moleculardynamics {
     }
 
     template <typename T>
+    void Ar_moleculardynamics<T>::getinfo() const
+    {
+        std::cout << "== Platform : " << device_.platform().name() << " ==\n";
+        std::cout <<
+        	"Name    : " << device_.platform().get_info<CL_PLATFORM_NAME>() << '\n' <<
+        	"Vendor  : " << device_.platform().get_info<CL_PLATFORM_VENDOR>() << '\n' <<
+        	"Version : " << device_.platform().get_info<CL_PLATFORM_VERSION>() << '\n' ;
+
+        std::cout << "== Device : " << device_.name() << " ==\n";
+        std::cout <<
+        	"Name               : " << device_.get_info<CL_DEVICE_NAME>() << '\n' <<
+        	"Vendor             : " << device_.get_info<CL_DEVICE_VENDOR>() <<
+            " (ID:" << device_.get_info<CL_DEVICE_VENDOR_ID>() << ")\n" <<
+        	"Version            : " << device_.get_info<CL_DEVICE_VERSION>() << '\n' <<
+        	"Driver version     : " << device_.get_info<CL_DRIVER_VERSION>() << '\n' <<
+        	"OpenCL C version   : " << device_.get_info<CL_DEVICE_OPENCL_C_VERSION>() << std::endl;
+    }
+
+    template <typename T>
     void Ar_moleculardynamics<T>::Move_Atoms()
     {
         // 運動エネルギーの初期化
@@ -587,7 +612,7 @@ namespace moleculardynamics {
         // 全エネルギー（運動エネルギー+ポテンシャルエネルギー）の計算
         Utot_ = Uk_ + Up_;
 
-        std::cout << boost::format("MDステップ = %d, ポテンシャル = %.8f, 運動エネルギー = %.8f\n") % MD_iter_ % Up_ % Uk_;
+        std::cout << boost::format("step = %d, 全エネルギー = %.8f, ポテンシャル = %.8f, 運動エネルギー = %.8f\n") % MD_iter_ % Utot_ % Up_ % Uk_;
 
         // 温度の計算
         Tc_ = Uk_ / (1.5 * static_cast<T>(NumAtom_));
@@ -631,13 +656,18 @@ namespace moleculardynamics {
                 1,
                 [this, s](std::int32_t n) {
                     auto const rtmp = r_[n].data;
-            
+#ifdef NVE
+                    r_[n].data[0] = 2.0 * r_[n].data[0] - r1_[n].data[0] + F_[n].data[0] * dt2;
+                    r_[n].data[1] = 2.0 * r_[n].data[1] - r1_[n].data[1] + F_[n].data[1] * dt2;
+                    r_[n].data[2] = 2.0 * r_[n].data[2] - r1_[n].data[2] + F_[n].data[2] * dt2;
+#else
                     // update coordinates and velocity
                     // Verlet法の座標更新式において速度成分を抜き出し、その部分をスケールする
                     r_[n].data[0] += s * (r_[n].data[0] - r1_[n].data[0]) + F_[n].data[0] * dt2;
                     r_[n].data[1] += s * (r_[n].data[1] - r1_[n].data[1]) + F_[n].data[1] * dt2;
                     r_[n].data[2] += s * (r_[n].data[2] - r1_[n].data[2]) + F_[n].data[2] * dt2;
-            
+#endif
+
                     V_[n].data[0] = 0.5 * (r_[n].data[0] - r1_[n].data[0]) / Ar_moleculardynamics::DT;
                     V_[n].data[1] = 0.5 * (r_[n].data[1] - r1_[n].data[1]) / Ar_moleculardynamics::DT;
                     V_[n].data[2] = 0.5 * (r_[n].data[2] - r1_[n].data[2]) / Ar_moleculardynamics::DT;
@@ -687,7 +717,7 @@ namespace moleculardynamics {
         // 全エネルギー（運動エネルギー+ポテンシャルエネルギー）の計算
         Utot_ = Uk_ + Up_;
 
-        std::cout << boost::format("MDステップ = %d, ポテンシャル = %.8f, 運動エネルギー = %.8f\n") % MD_iter_ % Up_ % Uk_;
+        std::cout << boost::format("step = %d, 全エネルギー = %.8f, ポテンシャル = %.8f, 運動エネルギー = %.8f\n") % MD_iter_ % Utot_ % Up_ % Uk_;
 
         // 温度の計算
         Tc_ = Uk_ / (1.5 * static_cast<T>(NumAtom_));
@@ -987,7 +1017,7 @@ namespace moleculardynamics {
             __global float4 r[],
             __global float4 r1[],
             __global float4 V[],
-            __global __const float4 f[],
+            __global __const float4 F[],
             __const float deltat,
             __const float s)
         {
@@ -995,11 +1025,13 @@ namespace moleculardynamics {
             float4 const dt = (float4)(deltat);
             float4 const dt2 = dt * dt;
             float4 const rtmp = r[n];
-
+#ifdef NVE
+            r[n] = (float4)(2.0f) * r[n] - r1[n] + F[n] * dt2;
+#else
             // update coordinates and velocity
             // Verlet法の座標更新式において速度成分を抜き出し、その部分をスケールする
-            r[n] += (float4)(s) * (r[n] - r1[n]) + f[n] * dt2;
-
+            r[n] += (float4)(s)* (r[n] - r1[n]) + F[n] * dt2;
+#endif
             V[n] = (float4)(0.5f) * (r[n] - r1[n]) / dt;
 
             r1[n] = rtmp;
@@ -1011,7 +1043,7 @@ namespace moleculardynamics {
             __global float4 r[],
             __global float4 r1[],
             __global float4 V[],
-            __global __const float4 f[],
+            __global __const float4 F[],
             __const float deltat,
             __const float s)
         {
@@ -1025,9 +1057,9 @@ namespace moleculardynamics {
             V[n] *= (float4)(s);
 
             // update coordinates and velocity
-            r[n] += dt * V[n] + (float4)(0.5f) * f[n] * dt2;
+            r[n] += dt * V[n] + (float4)(0.5f) * F[n] * dt2;
 
-            V[n] += (float4)(dt)* f[n];
+            V[n] += (float4)(dt) * F[n];
         });
 
         kernel_move_atoms1_ = kernel::create_with_source(move_atoms1_source, "move_atoms1", context_);
