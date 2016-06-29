@@ -1,5 +1,5 @@
 ﻿/*! \file Ar_moleculardynamics.h
-    \brief アルゴンに対して、分子動力学シミュレーションを行うクラスの宣言
+    \brief アルゴンに対して、分子動力学シミュレーションを行うクラスの宣言と実装
 
     Copyright ©  2016 @dc1394 All Rights Reserved.
     This software is released under the BSD 2-Clause License.
@@ -32,7 +32,7 @@
 namespace moleculardynamics {
     namespace compute = boost::compute;
 
-    //! A class.
+    //! A template class.
     /*!
         アルゴンに対して、分子動力学シミュレーションを行うクラス
     */
@@ -138,7 +138,7 @@ namespace moleculardynamics {
         /*!
             初期のスーパーセルの個数
         */
-        static auto constexpr FIRSTNC = 6;
+        static auto constexpr FIRSTNC = 8;
 
         //! A private member variable (constant).
         /*!
@@ -175,7 +175,7 @@ namespace moleculardynamics {
         /*!
             ローカルワークサイズ
         */
-        static auto constexpr LOCALWORKSIZE = 96;
+        static auto constexpr LOCALWORKSIZE = 64;
 
         //! A private member variable (constant).
         /*!
@@ -217,7 +217,7 @@ namespace moleculardynamics {
         /*!
             n個目の原子に働く力
         */
-        std::vector<myvector::Vector4<T>> F_;
+        std::vector<myvector::vector4<T>> F_;
         
         //! A private member variable.
         /*!
@@ -289,13 +289,13 @@ namespace moleculardynamics {
         /*!
             n個目の原子の座標
         */
-        std::vector<myvector::Vector4<T>> r_;
+        std::vector<myvector::vector4<T>> r_;
 
         //! A private member variable.
         /*!
             n個目の原子の座標の複製
         */
-        std::vector<myvector::Vector4<T>> r_clone_;
+        std::vector<myvector::vector4<T>> r_clone_;
 
         //! A private member variable.
         /*!
@@ -307,7 +307,7 @@ namespace moleculardynamics {
         /*!
             n個目の原子の初期座標
         */
-        std::vector<myvector::Vector4<T>> r1_;
+        std::vector<myvector::vector4<T>> r1_;
 
         //! A private member variable.
         /*!
@@ -385,13 +385,13 @@ namespace moleculardynamics {
         /*!
             n個目の原子の速度
         */
-        std::vector<myvector::Vector4<T>> V_;
+        std::vector<myvector::vector4<T>> V_;
 
         //! A private member variable.
         /*!
             n個目の原子の速度（複製用）
         */
-        std::vector<myvector::Vector4<T>> V_clone_;
+        std::vector<myvector::vector4<T>> V_clone_;
 
         //! A private member variable.
         /*!
@@ -581,6 +581,10 @@ namespace moleculardynamics {
     template <typename T>
     void Ar_moleculardynamics<T>::getinfo() const
     {
+        // OpenCLプラットフォーム及びデバイスの情報を表示する
+        // 参考：https://bitbucket.org/aokomoriuta/simd/src/4d86663bf1c4d7d30d5441feca83115e1c7dcaf3/ocl/ocl/ocl.cpp?fileviewer=file-view-default
+        // by 青子守歌様
+
         std::cout << "== Platform : " << device_.platform().name() << " ==\n";
         std::cout <<
         	"Name    : " << device_.platform().get_info<CL_PLATFORM_NAME>() << '\n' <<
@@ -880,7 +884,7 @@ namespace moleculardynamics {
             rndZ *= tmp;
             
             // 方向はランダムに与える
-            return myvector::Vector4<T>(v * rndX, v * rndY, v * rndZ);
+            return myvector::vector4<T>(v * rndX, v * rndY, v * rndZ);
         };
 
         boost::generate(V_, generator4);
