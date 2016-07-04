@@ -44,5 +44,8 @@
     <ClInclude Include="myvector\vector4.h">
       <Filter>ヘッダー ファイル\myvector</Filter>
     </ClInclude>
+    <ClInclude Include="moleculardynamics\paralleltype.h">
+      <Filter>ヘッダー ファイル\moleculardynamics</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

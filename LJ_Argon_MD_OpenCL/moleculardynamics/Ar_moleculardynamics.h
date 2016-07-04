@@ -11,23 +11,26 @@
 #pragma once
 
 #include "../myrandom/myrand.h"
+#include "paralleltype.h"
 #include "../myvector/vector4.h"
 #include <cstdint>                                  // for std::int32_t
 #include <cmath>                                    // for std::sqrt, std::pow
+#include <fstream>                                  // for std::ofstream
 #include <iostream>                                 // for std::ios_base::fixed, std::ios_base::floatfield, std::cout
+#include <string>                                   // for std::string
 #include <vector>                                   // for std::vector
+#include <cilk/cilk.h>                              // for cilk_for
+#include <cilk/reducer_opadd.h>                     // for cilk::reducer_opadd
 #include <boost/compute/algorithm/accumulate.hpp>   // for boost::compute::accumulate
 #include <boost/compute/algorithm/fill.hpp>         // for boost::compute::fill
 #include <boost/compute/algorithm/transform.hpp>    // for boost::compute::transform
 #include <boost/compute/container/vector.hpp>       // for boost::compute::vector
 #include <boost/compute/utility/source.hpp>         // for BOOST_COMPUTE_STRINGIZE_SOURCE
 #include <boost/format.hpp>                         // for boost::format
+#include <boost/mpl/int.hpp>                        // for boost::mpl::int_
 #include <boost/optional.hpp>                       // for boost::optional
 #include <boost/range/algorithm/generate.hpp>       // for boost::generate
 #include <boost/utility/in_place_factory.hpp>       // for boost::in_place
-#include <tbb/combinable.h>                         // for tbb::combinable
-#include <tbb/parallel_for.h>                       // for tbb::parallel_for
-#include <tbb/partitioner.h>                        // for tbb::auto_partitioner
 
 namespace moleculardynamics {
     namespace compute = boost::compute;
@@ -61,14 +64,30 @@ namespace moleculardynamics {
         /*!
             原子に働く力を計算する
         */
-        void Calc_Forces();
+        template <ParallelType N>
+        void Calc_Forces()
+        {
+             Calc_Forces(boost::mpl::int_<static_cast<std::int32_t>(N)>());
+        }
+                
+        //! A public member function.
+        /*!
+            原子に働く力を計算する（Cilkで並列化）
+        */
+        void Calc_Forces(boost::mpl::int_<static_cast<std::int32_t>(ParallelType::Cilk)>);
 
         //! A public member function.
         /*!
-            原子に働く力を計算する
+            原子に働く力を計算する（並列化なし）
         */
-        void Calc_Forces_OpenCL();
+        void Calc_Forces(boost::mpl::int_<static_cast<std::int32_t>(ParallelType::NoParallel)>);
 
+        //! A public member function.
+        /*!
+            原子に働く力を計算する（Cilkで並列化）
+        */
+        void Calc_Forces(boost::mpl::int_<static_cast<std::int32_t>(ParallelType::OpenCl)>);
+        
         //! A public member function.
         /*!
             OpenCLについての情報を表示する
@@ -79,13 +98,29 @@ namespace moleculardynamics {
         /*!
             原子を移動させる
         */
-        void Move_Atoms();
+        template <ParallelType N>
+        void Move_Atoms()
+        {
+            Move_Atoms(boost::mpl::int_<static_cast<std::int32_t>(N)>());
+        }
+        
+        //! A public member function.
+        /*!
+            原子を移動させる（並列化なし）
+        */
+        void Move_Atoms(boost::mpl::int_<static_cast<std::int32_t>(ParallelType::Cilk)>);
         
         //! A public member function.
         /*!
             原子を移動させる
         */
-        void Move_Atoms_OpenCL();
+        void Move_Atoms(boost::mpl::int_<static_cast<std::int32_t>(ParallelType::NoParallel)>);
+        
+        //! A public member function.
+        /*!
+            原子を移動させる
+        */
+        void Move_Atoms(boost::mpl::int_<static_cast<std::int32_t>(ParallelType::OpenCl)>);
         
         //! A public member function.
         /*!
@@ -179,6 +214,24 @@ namespace moleculardynamics {
 
         //! A private member variable (constant).
         /*!
+            OpenCLで並列化した場合の結果を出力するファイル名
+        */
+        static std::string const OPENCLRESULTFILENAME;
+        
+        //! A private member variable (constant).
+        /*!
+            並列化なしの場合の結果を出力するファイル名
+        */
+        static std::string const RESULTFILENAME;
+
+        //! A private member variable (constant).
+        /*!
+            TBBで並列化した場合の結果を出力するファイル名
+        */
+        static std::string const TBBRESULTFILENAME;
+
+        //! A private member variable (constant).
+        /*!
             アルゴン原子に対するε
         */
         static T const YPSILON;
@@ -259,7 +312,7 @@ namespace moleculardynamics {
         /*!
             相互作用を計算するセルの個数
         */
-        std::int32_t const ncp_ = 3;
+        std::int32_t const ncp_ = 4;
 
         //! A private member variable.
         /*!
@@ -267,6 +320,18 @@ namespace moleculardynamics {
         */
         std::int32_t NumAtom_;
         
+        //! A private member variable.
+        /*!
+            並列化なしの場合の結果出力用のファイルストリーム
+        */
+        std::ofstream ofs_;
+
+        //! A private member variable.
+        /*!
+            OpenCLで並列化した場合の結果出力用のファイルストリーム
+        */
+        std::ofstream openclofs_;
+
         //! A private member variable.
         /*!
             周期境界条件の長さ
@@ -345,6 +410,12 @@ namespace moleculardynamics {
         */
         T scale_ = Ar_moleculardynamics::FIRSTSCALE;
 
+        //! A private member variable.
+        /*!
+            TBBで並列化した場合の結果出力用のファイルストリーム
+        */
+        std::ofstream tbbofs_;
+        
         //! A private member variable.
         /*!
             計算された温度Tcalc
@@ -429,19 +500,28 @@ namespace moleculardynamics {
     // #region static private 定数
 
     template <typename T>
+    T const Ar_moleculardynamics<T>::ALPHA = 0.2;
+    
+    template <typename T>
+    T const Ar_moleculardynamics<T>::DT = 0.001;
+
+    template <typename T>
     T const Ar_moleculardynamics<T>::FIRSTSCALE = 1.0;
     
     template <typename T>
     T const Ar_moleculardynamics<T>::FIRSTTEMP = 1.0;
 
     template <typename T>
-    T const Ar_moleculardynamics<T>::ALPHA = 0.2;
-
-    template <typename T>
-    T const Ar_moleculardynamics<T>::DT = 0.001;
-
-    template <typename T>
     T const Ar_moleculardynamics<T>::KB = 1.3806488E-23;
+
+    template <typename T>
+    std::string const Ar_moleculardynamics<T>::OPENCLRESULTFILENAME = "opencl_result.txt";
+
+    template <typename T>
+    std::string const Ar_moleculardynamics<T>::RESULTFILENAME = "result.txt";
+
+    template <typename T>
+    std::string const Ar_moleculardynamics<T>::TBBRESULTFILENAME = "tbb_result.txt";
 
     template <typename T>
     T const Ar_moleculardynamics<T>::YPSILON = 1.6540172624E-21;
@@ -458,6 +538,8 @@ namespace moleculardynamics {
         dt2(DT * DT),
         F_(Nc_ * Nc_ * Nc_ * 4),
         F_dev_(Nc_ * Nc_ * Nc_ * 4, context_),
+        ofs_(Ar_moleculardynamics::RESULTFILENAME),
+        openclofs_(Ar_moleculardynamics::OPENCLRESULTFILENAME),
         queue_(context_, device_),
         rc2_(rc_ * rc_),
         rcm6_(std::pow(rc_, -6.0)),
@@ -468,6 +550,7 @@ namespace moleculardynamics {
         r_dev_(Nc_ * Nc_ * Nc_ * 4, context_),
         r1_(Nc_ * Nc_ * Nc_ * 4),
         r1_dev_(Nc_ * Nc_ * Nc_ * 4, context_),
+        tbbofs_(Ar_moleculardynamics::TBBRESULTFILENAME),
         Up_dev_(Nc_ * Nc_ * Nc_ * 4, context_),
         V_(Nc_ * Nc_ * Nc_ * 4),
         V_clone_(Nc_ * Nc_ * Nc_ * 4),
@@ -492,23 +575,20 @@ namespace moleculardynamics {
     // #region publicメンバ関数
 
     template <typename T>
-    void Ar_moleculardynamics<T>::Calc_Forces()
+    void Ar_moleculardynamics<T>::Calc_Forces(boost::mpl::int_<static_cast<std::int32_t>(ParallelType::Cilk)>)
     {
         // 各原子に働く力の初期化
-        for (auto n = 0; n < NumAtom_; n++) {
+        cilk_for (auto n = 0; n < NumAtom_; n++) {
             F_[n].data[0] = static_cast<T>(0);
             F_[n].data[1] = static_cast<T>(0);
             F_[n].data[2] = static_cast<T>(0);
         }
 
         // ポテンシャルエネルギーの初期化
-        tbb::combinable<T> Up;
+        cilk::reducer_opadd<T> Up;
+        Up.set_value(0.0);
 
-        tbb::parallel_for(
-            0,
-            NumAtom_,
-            1,
-            [this, &Up](std::int32_t n) {
+        cilk_for (auto n = 0; n < NumAtom_; n++) {
             for (auto m = 0; m < NumAtom_; m++) {
 
                 // ±ncp_分のセル内の原子との相互作用を計算
@@ -541,21 +621,76 @@ namespace moleculardynamics {
                                     F_[n].data[2] += dz / r * Fr;
 
                                     // エネルギーの計算、ただし二重計算のために0.5をかけておく
-                                    Up.local() += 0.5 * (4.0 * (rm12 - rm6) - Vrc_);
+                                    Up += 0.5 * (4.0 * (rm12 - rm6) - Vrc_);
                                 }
                             }
                         }
                     }
                 }
             }
-        },
-            tbb::auto_partitioner());
+        }
         
-        Up_ = Up.combine(std::plus<T>());
+        Up_ = Up.get_value();
     }
 
     template <typename T>
-    void Ar_moleculardynamics<T>::Calc_Forces_OpenCL()
+    void Ar_moleculardynamics<T>::Calc_Forces(boost::mpl::int_<static_cast<std::int32_t>(ParallelType::NoParallel)>)
+    {
+        // 各原子に働く力の初期化
+        for (auto n = 0; n < NumAtom_; n++) {
+            F_[n].data[0] = static_cast<T>(0);
+            F_[n].data[1] = static_cast<T>(0);
+            F_[n].data[2] = static_cast<T>(0);
+        }
+
+        // ポテンシャルエネルギーの初期化
+        Up_ = 0.0;
+
+        for (auto n = 0; n < NumAtom_; n++) {
+            for (auto m = 0; m < NumAtom_; m++) {
+
+                // ±ncp_分のセル内の原子との相互作用を計算
+                for (auto i = -ncp_; i <= ncp_; i++) {
+                    for (auto j = -ncp_; j <= ncp_; j++) {
+                        for (auto k = -ncp_; k <= ncp_; k++) {
+                            auto const sx = static_cast<T>(i) * periodiclen_;
+                            auto const sy = static_cast<T>(j) * periodiclen_;
+                            auto const sz = static_cast<T>(k) * periodiclen_;
+
+                            // 自分自身との相互作用を排除
+                            if (n != m || i != 0 || j != 0 || k != 0) {
+                                auto const dx = r_[n].data[0] - (r_[m].data[0] + sx);
+                                auto const dy = r_[n].data[1] - (r_[m].data[1] + sy);
+                                auto const dz = r_[n].data[2] - (r_[m].data[2] + sz);
+
+                                auto const r2 = norm2(dx, dy, dz);
+                                // 打ち切り距離内であれば計算
+                                if (r2 <= rc2_) {
+                                    auto const r = std::sqrt(r2);
+                                    auto const rm6 = 1.0 / (r2 * r2 * r2);
+                                    auto const rm7 = rm6 / r;
+                                    auto const rm12 = rm6 * rm6;
+                                    auto const rm13 = rm12 / r;
+
+                                    auto const Fr = 48.0 * rm13 - 24.0 * rm7;
+
+                                    F_[n].data[0] += dx / r * Fr;
+                                    F_[n].data[1] += dy / r * Fr;
+                                    F_[n].data[2] += dz / r * Fr;
+
+                                    // エネルギーの計算、ただし二重計算のために0.5をかけておく
+                                    Up_ += 0.5 * (4.0 * (rm12 - rm6) - Vrc_);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    template <typename T>
+    void Ar_moleculardynamics<T>::Calc_Forces(boost::mpl::int_<static_cast<std::int32_t>(ParallelType::OpenCl)>)
     {
         // ホスト→デバイス
         compute::copy(r_.begin(), r_.end(), r_dev_.begin(), queue_);
@@ -602,13 +737,13 @@ namespace moleculardynamics {
     }
 
     template <typename T>
-    void Ar_moleculardynamics<T>::Move_Atoms()
+    void Ar_moleculardynamics<T>::Move_Atoms(boost::mpl::int_<static_cast<std::int32_t>(ParallelType::Cilk)>)
     {
         // 運動エネルギーの初期化
         Uk_ = 0.0;
 
         // 運動エネルギーの計算
-        for (auto n = 0; n < NumAtom_; n++) {
+        cilk_for(auto n = 0; n < NumAtom_; n++) {
             Uk_ += norm2(V_[n].data[0], V_[n].data[1], V_[n].data[2]);
         }
         Uk_ *= 0.5;
@@ -616,7 +751,8 @@ namespace moleculardynamics {
         // 全エネルギー（運動エネルギー+ポテンシャルエネルギー）の計算
         Utot_ = Uk_ + Up_;
 
-        std::cout << boost::format("step = %d, 全エネルギー = %.8f, ポテンシャル = %.8f, 運動エネルギー = %.8f\n") % MD_iter_ % Utot_ % Up_ % Uk_;
+        std::cout << boost::format("MD step = %d, 全エネルギー = %.8f\n") % MD_iter_ % Utot_;
+        openclofs_ << boost::format("MD step = %d, 全エネルギー = %.8f\n") % MD_iter_ % Utot_;
 
         // 温度の計算
         Tc_ = Uk_ / (1.5 * static_cast<T>(NumAtom_));
@@ -628,11 +764,7 @@ namespace moleculardynamics {
         case 1:
             // update the coordinates by the second order Euler method
             // 最初のステップだけ修正Euler法で時間発展
-            tbb::parallel_for(
-                0,
-                NumAtom_,
-                1,
-                [this, s](std::int32_t n) {
+            cilk_for(auto n = 0; n < NumAtom_; n++) {
                 r1_[n].data = r_[n].data;
 
                 // scaling of velocity
@@ -648,47 +780,37 @@ namespace moleculardynamics {
                 V_[n].data[0] += Ar_moleculardynamics::DT * F_[n].data[0];
                 V_[n].data[1] += Ar_moleculardynamics::DT * F_[n].data[1];
                 V_[n].data[2] += Ar_moleculardynamics::DT * F_[n].data[2];
-            },
-                tbb::auto_partitioner());
-        break;
+            }
+            break;
 
         default:
             // update the coordinates by the Verlet method
-            tbb::parallel_for(
-                0,
-                NumAtom_,
-                1,
-                [this, s](std::int32_t n) {
-                    auto const rtmp = r_[n].data;
+            cilk_for(auto n = 0; n < NumAtom_; n++) {
+                auto const rtmp = r_[n].data;
 #ifdef NVE
-                    r_[n].data[0] = 2.0 * r_[n].data[0] - r1_[n].data[0] + F_[n].data[0] * dt2;
-                    r_[n].data[1] = 2.0 * r_[n].data[1] - r1_[n].data[1] + F_[n].data[1] * dt2;
-                    r_[n].data[2] = 2.0 * r_[n].data[2] - r1_[n].data[2] + F_[n].data[2] * dt2;
+                r_[n].data[0] = 2.0 * r_[n].data[0] - r1_[n].data[0] + F_[n].data[0] * dt2;
+                r_[n].data[1] = 2.0 * r_[n].data[1] - r1_[n].data[1] + F_[n].data[1] * dt2;
+                r_[n].data[2] = 2.0 * r_[n].data[2] - r1_[n].data[2] + F_[n].data[2] * dt2;
 #else
-                    // update coordinates and velocity
-                    // Verlet法の座標更新式において速度成分を抜き出し、その部分をスケールする
-                    r_[n].data[0] += s * (r_[n].data[0] - r1_[n].data[0]) + F_[n].data[0] * dt2;
-                    r_[n].data[1] += s * (r_[n].data[1] - r1_[n].data[1]) + F_[n].data[1] * dt2;
-                    r_[n].data[2] += s * (r_[n].data[2] - r1_[n].data[2]) + F_[n].data[2] * dt2;
+                // update coordinates and velocity
+                // Verlet法の座標更新式において速度成分を抜き出し、その部分をスケールする
+                r_[n].data[0] += s * (r_[n].data[0] - r1_[n].data[0]) + F_[n].data[0] * dt2;
+                r_[n].data[1] += s * (r_[n].data[1] - r1_[n].data[1]) + F_[n].data[1] * dt2;
+                r_[n].data[2] += s * (r_[n].data[2] - r1_[n].data[2]) + F_[n].data[2] * dt2;
 #endif
 
-                    V_[n].data[0] = 0.5 * (r_[n].data[0] - r1_[n].data[0]) / Ar_moleculardynamics::DT;
-                    V_[n].data[1] = 0.5 * (r_[n].data[1] - r1_[n].data[1]) / Ar_moleculardynamics::DT;
-                    V_[n].data[2] = 0.5 * (r_[n].data[2] - r1_[n].data[2]) / Ar_moleculardynamics::DT;
-            
-                    r1_[n].data = rtmp;
-                },
-                tbb::auto_partitioner());
+                V_[n].data[0] = 0.5 * (r_[n].data[0] - r1_[n].data[0]) / Ar_moleculardynamics::DT;
+                V_[n].data[1] = 0.5 * (r_[n].data[1] - r1_[n].data[1]) / Ar_moleculardynamics::DT;
+                V_[n].data[2] = 0.5 * (r_[n].data[2] - r1_[n].data[2]) / Ar_moleculardynamics::DT;
+
+                r1_[n].data = rtmp;
+            }
             break;
         }
 
         // consider the periodic boundary condination
         // セルの外側に出たら座標をセル内に戻す
-        tbb::parallel_for(
-            0,
-            NumAtom_,
-            1,
-            [this](std::int32_t n) {
+        cilk_for(auto n = 0; n < NumAtom_; n++) {
             for (auto i = 0; i < 3; i++) {
                 if (r_[n].data[i] > periodiclen_) {
                     r_[n].data[i] -= periodiclen_;
@@ -699,14 +821,103 @@ namespace moleculardynamics {
                     r1_[n].data[i] += periodiclen_;
                 }
             }
-        },
-            tbb::auto_partitioner());
+        }
 
         MD_iter_++;
     }
 
     template <typename T>
-    void Ar_moleculardynamics<T>::Move_Atoms_OpenCL()
+    void Ar_moleculardynamics<T>::Move_Atoms(boost::mpl::int_<static_cast<std::int32_t>(ParallelType::NoParallel)>)
+    {
+        // 運動エネルギーの初期化
+        Uk_ = 0.0;
+
+        // 運動エネルギーの計算
+        for (auto n = 0; n < NumAtom_; n++) {
+            Uk_ += norm2(V_[n].data[0], V_[n].data[1], V_[n].data[2]);
+        }
+        Uk_ *= 0.5;
+
+        // 全エネルギー（運動エネルギー+ポテンシャルエネルギー）の計算
+        Utot_ = Uk_ + Up_;
+
+        std::cout << boost::format("MD step = %d, 全エネルギー = %.8f\n") % MD_iter_ % Utot_;
+        ofs_ << boost::format("MD step = %d, 全エネルギー = %.8f\n") % MD_iter_ % Utot_;
+
+        // 温度の計算
+        Tc_ = Uk_ / (1.5 * static_cast<T>(NumAtom_));
+
+        // calculate temperture
+        auto const s = std::sqrt((Tg_ + Ar_moleculardynamics::ALPHA * (Tc_ - Tg_)) / Tc_);
+
+        switch (MD_iter_) {
+        case 1:
+            // update the coordinates by the second order Euler method
+            // 最初のステップだけ修正Euler法で時間発展
+            for (auto n = 0; n < NumAtom_; n++) {
+                r1_[n].data = r_[n].data;
+
+                // scaling of velocity
+                V_[n].data[0] *= s;
+                V_[n].data[1] *= s;
+                V_[n].data[2] *= s;
+
+                // update coordinates and velocity
+                r_[n].data[0] += Ar_moleculardynamics::DT * V_[n].data[0] + 0.5 * F_[n].data[0] * dt2;
+                r_[n].data[1] += Ar_moleculardynamics::DT * V_[n].data[1] + 0.5 * F_[n].data[1] * dt2;
+                r_[n].data[2] += Ar_moleculardynamics::DT * V_[n].data[2] + 0.5 * F_[n].data[2] * dt2;
+
+                V_[n].data[0] += Ar_moleculardynamics::DT * F_[n].data[0];
+                V_[n].data[1] += Ar_moleculardynamics::DT * F_[n].data[1];
+                V_[n].data[2] += Ar_moleculardynamics::DT * F_[n].data[2];
+            }
+        break;
+
+        default:
+            // update the coordinates by the Verlet method
+            for (auto n = 0; n < NumAtom_; n++) {
+                auto const rtmp = r_[n].data;
+#ifdef NVE
+                r_[n].data[0] = 2.0 * r_[n].data[0] - r1_[n].data[0] + F_[n].data[0] * dt2;
+                r_[n].data[1] = 2.0 * r_[n].data[1] - r1_[n].data[1] + F_[n].data[1] * dt2;
+                r_[n].data[2] = 2.0 * r_[n].data[2] - r1_[n].data[2] + F_[n].data[2] * dt2;
+#else
+                // update coordinates and velocity
+                // Verlet法の座標更新式において速度成分を抜き出し、その部分をスケールする
+                r_[n].data[0] += s * (r_[n].data[0] - r1_[n].data[0]) + F_[n].data[0] * dt2;
+                r_[n].data[1] += s * (r_[n].data[1] - r1_[n].data[1]) + F_[n].data[1] * dt2;
+                r_[n].data[2] += s * (r_[n].data[2] - r1_[n].data[2]) + F_[n].data[2] * dt2;
+#endif
+
+                V_[n].data[0] = 0.5 * (r_[n].data[0] - r1_[n].data[0]) / Ar_moleculardynamics::DT;
+                V_[n].data[1] = 0.5 * (r_[n].data[1] - r1_[n].data[1]) / Ar_moleculardynamics::DT;
+                V_[n].data[2] = 0.5 * (r_[n].data[2] - r1_[n].data[2]) / Ar_moleculardynamics::DT;
+                
+                r1_[n].data = rtmp;
+            }
+        break;
+        }
+
+        // consider the periodic boundary condination
+        // セルの外側に出たら座標をセル内に戻す
+        for (auto n = 0; n < NumAtom_; n++) {
+            for (auto i = 0; i < 3; i++) {
+                if (r_[n].data[i] > periodiclen_) {
+                    r_[n].data[i] -= periodiclen_;
+                    r1_[n].data[i] -= periodiclen_;
+                }
+                else if (r_[n].data[i] < 0.0) {
+                    r_[n].data[i] += periodiclen_;
+                    r1_[n].data[i] += periodiclen_;
+                }
+            }
+        }
+
+        MD_iter_++;
+    }
+
+    template <typename T>
+    void Ar_moleculardynamics<T>::Move_Atoms(boost::mpl::int_<static_cast<std::int32_t>(ParallelType::OpenCl)>)
     {
         // ホスト→デバイス
         compute::copy(r_.begin(), r_.end(), r_dev_.begin(), queue_ );
@@ -721,7 +932,8 @@ namespace moleculardynamics {
         // 全エネルギー（運動エネルギー+ポテンシャルエネルギー）の計算
         Utot_ = Uk_ + Up_;
 
-        std::cout << boost::format("step = %d, 全エネルギー = %.8f, ポテンシャル = %.8f, 運動エネルギー = %.8f\n") % MD_iter_ % Utot_ % Up_ % Uk_;
+        std::cout << boost::format("MD step = %d, 全エネルギー = %.8f\n") % MD_iter_ % Utot_;
+        tbbofs_ << boost::format("MD step = %d, 全エネルギー = %.8f\n") % MD_iter_ % Utot_;
 
         // 温度の計算
         Tc_ = Uk_ / (1.5 * static_cast<T>(NumAtom_));

@@ -15,8 +15,19 @@ int main()
     cp.checkpoint("‰Šú‰»ˆ—", __LINE__);
 
     for (auto i = 0; i < LOOP; i++) {
-        armd.Calc_Forces();
-        armd.Move_Atoms();
+        armd.Calc_Forces<moleculardynamics::ParallelType::NoParallel>();
+        armd.Move_Atoms<moleculardynamics::ParallelType::NoParallel>();
+    }
+
+    cp.checkpoint("•À—ñ‰»–³‚µ", __LINE__);
+
+    armd.reset();
+    
+    cp.checkpoint("Ä‰Šú‰»", __LINE__);
+
+    for (auto i = 0; i < LOOP; i++) {
+        armd.Calc_Forces<moleculardynamics::ParallelType::Cilk>();
+        armd.Move_Atoms<moleculardynamics::ParallelType::Cilk>();
     }
 
     cp.checkpoint("TBB‚Å•À—ñ‰»", __LINE__);
@@ -26,8 +37,8 @@ int main()
     cp.checkpoint("Ä‰Šú‰»", __LINE__);
 
     for (auto i = 0; i < LOOP; i++) {
-        armd.Calc_Forces_OpenCL();
-        armd.Move_Atoms_OpenCL();
+        armd.Calc_Forces<moleculardynamics::ParallelType::OpenCl>();
+        armd.Move_Atoms<moleculardynamics::ParallelType::OpenCl>();
     }
 
     cp.checkpoint("OpenCL‚Å•À—ñ‰»", __LINE__);
