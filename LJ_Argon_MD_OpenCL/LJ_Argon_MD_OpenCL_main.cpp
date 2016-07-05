@@ -11,7 +11,7 @@ int main()
     cp.checkpoint("ˆ—ŠJn", __LINE__);
 
     moleculardynamics::Ar_moleculardynamics<float> armd;
-    
+
     cp.checkpoint("‰Šú‰»ˆ—", __LINE__);
 
     for (auto i = 0; i < LOOP; i++) {
@@ -26,8 +26,8 @@ int main()
     cp.checkpoint("Ä‰Šú‰»", __LINE__);
 
     for (auto i = 0; i < LOOP; i++) {
-        armd.Calc_Forces<moleculardynamics::ParallelType::Cilk>();
-        armd.Move_Atoms<moleculardynamics::ParallelType::Cilk>();
+        armd.Calc_Forces<moleculardynamics::ParallelType::Tbb>();
+        armd.Move_Atoms<moleculardynamics::ParallelType::Tbb>();
     }
 
     cp.checkpoint("TBB‚Å•À—ñ‰»", __LINE__);

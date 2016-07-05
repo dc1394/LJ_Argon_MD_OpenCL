@@ -14,9 +14,9 @@
 
 namespace moleculardynamics {
     enum class ParallelType : std::int32_t {
-        Cilk = 0,
-        NoParallel = 1,
-        OpenCl = 2
+        NoParallel = 0,
+        OpenCl = 1,
+        Tbb = 2
     };
 }
 
