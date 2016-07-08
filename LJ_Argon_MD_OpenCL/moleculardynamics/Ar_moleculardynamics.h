@@ -31,7 +31,6 @@
 #include <boost/utility/in_place_factory.hpp>       // for boost::in_place
 #include <tbb/combinable.h>                         // for tbb::combinable
 #include <tbb/parallel_for.h>                       // for tbb::parallel_for
-#include <tbb/partitioner.h>                        // for tbb::auto_partitioner
 
 namespace moleculardynamics {
     namespace compute = boost::compute;
@@ -211,7 +210,7 @@ namespace moleculardynamics {
         /*!
             ローカルワークサイズ
         */
-        static auto constexpr LOCALWORKSIZE = 64;
+        static auto constexpr LOCALWORKSIZE = 256;
 
         //! A private member variable (constant).
         /*!
@@ -659,7 +658,7 @@ namespace moleculardynamics {
     void Ar_moleculardynamics<T>::Calc_Forces(boost::mpl::int_<static_cast<std::int32_t>(ParallelType::Tbb)>)
     {
         // 各原子に働く力の初期化
-        for(auto n = 0; n < NumAtom_; n++) {
+        for (auto n = 0; n < NumAtom_; n++) {
             F_[n].data[0] = static_cast<T>(0);
             F_[n].data[1] = static_cast<T>(0);
             F_[n].data[2] = static_cast<T>(0);
@@ -669,51 +668,50 @@ namespace moleculardynamics {
         tbb::combinable<T> Up;
 
         tbb::parallel_for(
-            0,
-            NumAtom_,
-            1,
-            [this, &Up](std::int32_t n) {
-            for (auto m = 0; m < NumAtom_; m++) {
+            tbb::blocked_range<std::int32_t>(0, NumAtom_),
+            [this, &Up](auto const & range) {
+                for (auto && n = range.begin(); n != range.end(); ++n) {
+                    for (auto m = 0; m < NumAtom_; m++) {
 
-                // ±ncp_分のセル内の原子との相互作用を計算
-                for (auto i = -ncp_; i <= ncp_; i++) {
-                    for (auto j = -ncp_; j <= ncp_; j++) {
-                        for (auto k = -ncp_; k <= ncp_; k++) {
-                            auto const sx = static_cast<T>(i) * periodiclen_;
-                            auto const sy = static_cast<T>(j) * periodiclen_;
-                            auto const sz = static_cast<T>(k) * periodiclen_;
+                        // ±ncp_分のセル内の原子との相互作用を計算
+                        for (auto i = -ncp_; i <= ncp_; i++) {
+                            for (auto j = -ncp_; j <= ncp_; j++) {
+                                for (auto k = -ncp_; k <= ncp_; k++) {
+                                    auto const sx = static_cast<T>(i) * periodiclen_;
+                                    auto const sy = static_cast<T>(j) * periodiclen_;
+                                    auto const sz = static_cast<T>(k) * periodiclen_;
 
-                            // 自分自身との相互作用を排除
-                            if (n != m || i != 0 || j != 0 || k != 0) {
-                                auto const dx = r_[n].data[0] - (r_[m].data[0] + sx);
-                                auto const dy = r_[n].data[1] - (r_[m].data[1] + sy);
-                                auto const dz = r_[n].data[2] - (r_[m].data[2] + sz);
+                                    // 自分自身との相互作用を排除
+                                    if (n != m || i != 0 || j != 0 || k != 0) {
+                                        auto const dx = r_[n].data[0] - (r_[m].data[0] + sx);
+                                        auto const dy = r_[n].data[1] - (r_[m].data[1] + sy);
+                                        auto const dz = r_[n].data[2] - (r_[m].data[2] + sz);
 
-                                auto const r2 = norm2(dx, dy, dz);
-                                // 打ち切り距離内であれば計算
-                                if (r2 <= rc2_) {
-                                    auto const r = std::sqrt(r2);
-                                    auto const rm6 = 1.0 / (r2 * r2 * r2);
-                                    auto const rm7 = rm6 / r;
-                                    auto const rm12 = rm6 * rm6;
-                                    auto const rm13 = rm12 / r;
+                                        auto const r2 = norm2(dx, dy, dz);
+                                        // 打ち切り距離内であれば計算
+                                        if (r2 <= rc2_) {
+                                            auto const r = std::sqrt(r2);
+                                            auto const rm6 = 1.0 / (r2 * r2 * r2);
+                                            auto const rm7 = rm6 / r;
+                                            auto const rm12 = rm6 * rm6;
+                                            auto const rm13 = rm12 / r;
 
-                                    auto const Fr = 48.0 * rm13 - 24.0 * rm7;
+                                            auto const Fr = 48.0 * rm13 - 24.0 * rm7;
 
-                                    F_[n].data[0] += dx / r * Fr;
-                                    F_[n].data[1] += dy / r * Fr;
-                                    F_[n].data[2] += dz / r * Fr;
+                                            F_[n].data[0] += dx / r * Fr;
+                                            F_[n].data[1] += dy / r * Fr;
+                                            F_[n].data[2] += dz / r * Fr;
 
-                                    // エネルギーの計算、ただし二重計算のために0.5をかけておく
-                                    Up.local() += 0.5 * (4.0 * (rm12 - rm6) - Vrc_);
+                                            // エネルギーの計算、ただし二重計算のために0.5をかけておく
+                                            Up.local() += 0.5 * (4.0 * (rm12 - rm6) - Vrc_);
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-        },
-            tbb::auto_partitioner());
+        });
 
         Up_ = Up.combine(std::plus<T>());
     }
@@ -756,8 +754,8 @@ namespace moleculardynamics {
         // 全エネルギー（運動エネルギー+ポテンシャルエネルギー）の計算
         Utot_ = Uk_ + Up_;
 
-        //std::cout << boost::format("MD step = %d, 全エネルギー = %.8f\n") % MD_iter_ % Utot_;
-        //ofs_ << boost::format("MD step = %d, 全エネルギー = %.8f\n") % MD_iter_ % Utot_;
+        std::cout << boost::format("MD step = %d, 全エネルギー = %.8f\n") % MD_iter_ % Utot_;
+        ofs_ << boost::format("MD step = %d, 全エネルギー = %.8f\n") % MD_iter_ % Utot_;
 
         // 温度の計算
         Tc_ = Uk_ / (1.5 * static_cast<T>(NumAtom_));
@@ -846,6 +844,7 @@ namespace moleculardynamics {
 
         // 全エネルギー（運動エネルギー+ポテンシャルエネルギー）の計算
         Utot_ = Uk_ + Up_;
+        
         //std::cout << boost::format("MD step = %d, 全エネルギー = %.8f\n") % MD_iter_ % Utot_;
         //tbbofs_ << boost::format("MD step = %d, 全エネルギー = %.8f\n") % MD_iter_ % Utot_;
 
@@ -929,8 +928,8 @@ namespace moleculardynamics {
         // 全エネルギー（運動エネルギー+ポテンシャルエネルギー）の計算
         Utot_ = Uk_ + Up_;
 
-        //std::cout << boost::format("MD step = %d, 全エネルギー = %.8f\n") % MD_iter_ % Utot_;
-        //openclofs_ << boost::format("MD step = %d, 全エネルギー = %.8f\n") % MD_iter_ % Utot_;
+        std::cout << boost::format("MD step = %d, 全エネルギー = %.8f\n") % MD_iter_ % Utot_;
+        openclofs_ << boost::format("MD step = %d, 全エネルギー = %.8f\n") % MD_iter_ % Utot_;
 
         // 温度の計算
         Tc_ = Uk_ / (1.5 * static_cast<T>(NumAtom_));
@@ -943,78 +942,76 @@ namespace moleculardynamics {
             // update the coordinates by the second order Euler method
             // 最初のステップだけ修正Euler法で時間発展
             tbb::parallel_for(
-                0,
-                NumAtom_,
-                1,
-                [this, s](std::int32_t n) {
-                r1_[n].data = r_[n].data;
+                tbb::blocked_range<std::int32_t>(0, NumAtom_),
+                [this, s](auto const & range) {
+                    for (auto && n = range.begin(); n != range.end(); ++n) {
+                        r1_[n].data = r_[n].data;
 
-                // scaling of velocity
-                V_[n].data[0] *= s;
-                V_[n].data[1] *= s;
-                V_[n].data[2] *= s;
+                        // scaling of velocity
+                        V_[n].data[0] *= s;
+                        V_[n].data[1] *= s;
+                        V_[n].data[2] *= s;
 
-                // update coordinates and velocity
-                r_[n].data[0] += Ar_moleculardynamics::DT * V_[n].data[0] + 0.5 * F_[n].data[0] * dt2;
-                r_[n].data[1] += Ar_moleculardynamics::DT * V_[n].data[1] + 0.5 * F_[n].data[1] * dt2;
-                r_[n].data[2] += Ar_moleculardynamics::DT * V_[n].data[2] + 0.5 * F_[n].data[2] * dt2;
+                        // update coordinates and velocity
+                        r_[n].data[0] += Ar_moleculardynamics::DT * V_[n].data[0] + 0.5 * F_[n].data[0] * dt2;
+                        r_[n].data[1] += Ar_moleculardynamics::DT * V_[n].data[1] + 0.5 * F_[n].data[1] * dt2;
+                        r_[n].data[2] += Ar_moleculardynamics::DT * V_[n].data[2] + 0.5 * F_[n].data[2] * dt2;
 
-                V_[n].data[0] += Ar_moleculardynamics::DT * F_[n].data[0];
-                V_[n].data[1] += Ar_moleculardynamics::DT * F_[n].data[1];
-                V_[n].data[2] += Ar_moleculardynamics::DT * F_[n].data[2];
-            },
-                tbb::auto_partitioner());
+                        V_[n].data[0] += Ar_moleculardynamics::DT * F_[n].data[0];
+                        V_[n].data[1] += Ar_moleculardynamics::DT * F_[n].data[1];
+                        V_[n].data[2] += Ar_moleculardynamics::DT * F_[n].data[2];
+                    }
+            });
             break;
 
         default:
             // update the coordinates by the Verlet method
             tbb::parallel_for(
-                0,
-                NumAtom_,
-                1,
-                [this, s](std::int32_t n) {
-                auto const rtmp = r_[n].data;
+                tbb::blocked_range<std::int32_t>(0, NumAtom_),
+                [this, s](auto const & range) {
+                    for (auto && n = range.begin(); n != range.end(); ++n) {
+                        auto const rtmp = r_[n].data;
 #ifdef NVE
-                r_[n].data[0] = 2.0 * r_[n].data[0] - r1_[n].data[0] + F_[n].data[0] * dt2;
-                r_[n].data[1] = 2.0 * r_[n].data[1] - r1_[n].data[1] + F_[n].data[1] * dt2;
-                r_[n].data[2] = 2.0 * r_[n].data[2] - r1_[n].data[2] + F_[n].data[2] * dt2;
+                        r_[n].data[0] = 2.0 * r_[n].data[0] - r1_[n].data[0] + F_[n].data[0] * dt2;
+                        r_[n].data[1] = 2.0 * r_[n].data[1] - r1_[n].data[1] + F_[n].data[1] * dt2;
+                        r_[n].data[2] = 2.0 * r_[n].data[2] - r1_[n].data[2] + F_[n].data[2] * dt2;
 #else
-                // update coordinates and velocity
-                // Verlet法の座標更新式において速度成分を抜き出し、その部分をスケールする
-                r_[n].data[0] += s * (r_[n].data[0] - r1_[n].data[0]) + F_[n].data[0] * dt2;
-                r_[n].data[1] += s * (r_[n].data[1] - r1_[n].data[1]) + F_[n].data[1] * dt2;
-                r_[n].data[2] += s * (r_[n].data[2] - r1_[n].data[2]) + F_[n].data[2] * dt2;
+                        // update coordinates and velocity
+                        // Verlet法の座標更新式において速度成分を抜き出し、その部分をスケールする
+                        r_[n].data[0] += s * (r_[n].data[0] - r1_[n].data[0]) + F_[n].data[0] * dt2;
+                        r_[n].data[1] += s * (r_[n].data[1] - r1_[n].data[1]) + F_[n].data[1] * dt2;
+                        r_[n].data[2] += s * (r_[n].data[2] - r1_[n].data[2]) + F_[n].data[2] * dt2;
 #endif
 
-                V_[n].data[0] = 0.5 * (r_[n].data[0] - r1_[n].data[0]) / Ar_moleculardynamics::DT;
-                V_[n].data[1] = 0.5 * (r_[n].data[1] - r1_[n].data[1]) / Ar_moleculardynamics::DT;
-                V_[n].data[2] = 0.5 * (r_[n].data[2] - r1_[n].data[2]) / Ar_moleculardynamics::DT;
+                        V_[n].data[0] = 0.5 * (r_[n].data[0] - r1_[n].data[0]) / Ar_moleculardynamics::DT;
+                        V_[n].data[1] = 0.5 * (r_[n].data[1] - r1_[n].data[1]) / Ar_moleculardynamics::DT;
+                        V_[n].data[2] = 0.5 * (r_[n].data[2] - r1_[n].data[2]) / Ar_moleculardynamics::DT;
 
-                r1_[n].data = rtmp;
-            },
-                tbb::auto_partitioner());
+                        r1_[n].data = rtmp;
+                    }
+            });
             break;
         }
 
         // consider the periodic boundary condination
         // セルの外側に出たら座標をセル内に戻す
         tbb::parallel_for(
-            0,
-            NumAtom_,
-            1,
-            [this](std::int32_t n) {
-            for (auto i = 0; i < 3; i++) {
-                if (r_[n].data[i] > periodiclen_) {
-                    r_[n].data[i] -= periodiclen_;
-                    r1_[n].data[i] -= periodiclen_;
+            tbb::blocked_range<std::int32_t>(0, NumAtom_),
+            [this, s](auto const & range) {
+                for (auto && n = range.begin(); n != range.end(); ++n) {
+                    for (auto i = 0; i < 3; i++) {
+                        if (r_[n].data[i] > periodiclen_) {
+                            r_[n].data[i] -= periodiclen_;
+                            r1_[n].data[i] -= periodiclen_;
+                        }
+                        else if (r_[n].data[i] < 0.0) {
+                            r_[n].data[i] += periodiclen_;
+                            r1_[n].data[i] += periodiclen_;
+                        }
+                    }
                 }
-                else if (r_[n].data[i] < 0.0) {
-                    r_[n].data[i] += periodiclen_;
-                    r1_[n].data[i] += periodiclen_;
-                }
-            }
-        },
-            tbb::auto_partitioner());
+        });
+        
 
         MD_iter_++;
     }
@@ -1260,13 +1257,13 @@ namespace moleculardynamics {
             float4 const dt = (float4)(deltat);
             float4 const dt2 = dt * dt;
             float4 const rtmp = r[n];
-#ifdef NVE
-            r[n] = (float4)(2.0f) * r[n] - r1[n] + F[n] * dt2;
-#else
+//#ifdef NVE
+//            r[n] = (float4)(2.0f) * r[n] - r1[n] + F[n] * dt2;
+//#else
             // update coordinates and velocity
             // Verlet法の座標更新式において速度成分を抜き出し、その部分をスケールする
-            r[n] += (float4)(s)* (r[n] - r1[n]) + F[n] * dt2;
-#endif
+            r[n] += (float4)(s) * (r[n] - r1[n]) + F[n] * dt2;
+//#endif
             V[n] = (float4)(0.5f) * (r[n] - r1[n]) / dt;
 
             r1[n] = rtmp;
