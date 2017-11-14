@@ -639,7 +639,7 @@ namespace moleculardynamics {
         compute::fill(F_dev_.begin(), F_dev_.end(), compute::float4_(0.0f), queue_);
         compute::fill(Up_dev_.begin(), Up_dev_.end(), 0.0f, queue_);
         
-        // 各原子に働く力とポテンシャルエネルギーを計算
+        //// 各原子に働く力とポテンシャルエネルギーを計算
         auto const event_force = queue_.enqueue_1d_range_kernel(
             kernel_force_,
             0,
