@@ -22,7 +22,7 @@
     <ProjectGuid>{1CB54E83-C149-4D5D-B1D7-CCA7518200F1}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>LJ_Argon_MD_OpenCL</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0.15063.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.17134.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -47,7 +47,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>Intel C++ Compiler 18.0</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
     <UseIntelTBB>true</UseIntelTBB>
@@ -152,7 +152,7 @@
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <GenerateAlternateCodePaths>CORE512</GenerateAlternateCodePaths>
       <UseProcessorExtensions>CORE512</UseProcessorExtensions>
-      <Optimization>MaxSpeedHighLevel</Optimization>
+      <Optimization>Full</Optimization>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
